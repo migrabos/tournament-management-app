@@ -1,4 +1,4 @@
-# Brak zewnętrznych zależności — projekt używa wyłącznie biblioteki standardowej:
-#   - sqlite3 (baza danych)
-#   - tkinter (GUI, wbudowane w Pythona)
 # Wymagany Python 3.10+
+#   - sqlite3 (baza danych, wbudowane w Pythona)
+#   - PySide6 (GUI)
+PySide6>=6.5

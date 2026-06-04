@@ -1,0 +1,173 @@
+"""Jedno okno aplikacji: stały pasek (motyw + nawigacja) i przełączane strony."""
+import sys
+from PySide6.QtWidgets import (
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QStackedWidget,
+    QTableWidgetItem, QInputDialog, QMessageBox, QHeaderView,
+)
+from PySide6.QtCore import Qt
+
+from app.dao import tournament_dao
+from app.ui.theme import stylesheet, toggle_mode
+from app.ui.widgets import primary_button, button, h1, muted, table, status_badge, center_headers
+from app.ui.tournament_window import TournamentPage
+
+UID = Qt.UserRole
+
+
+class ListPage(QWidget):
+    """Strona listy turniejów."""
+
+    def __init__(self, on_open):
+        super().__init__()
+        self.setObjectName("root")
+        self.on_open = on_open
+
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(10, 4, 10, 10)
+        lay.setSpacing(6)
+        lay.addWidget(h1("Turnieje"))
+        lay.addWidget(muted("Wybierz turniej z listy lub utwórz nowy."))
+        lay.addSpacing(10)
+
+        self.table = table(["Nazwa", "Status", "Utworzono"], stretch_col=0)
+        center_headers(self.table, [1, 2])
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Fixed)
+        self.table.setColumnWidth(1, 170)
+        self.table.verticalHeader().setDefaultSectionSize(44)
+        self.table.cellDoubleClicked.connect(lambda *_: self._open())
+        lay.addWidget(self.table)
+
+        bar = QHBoxLayout()
+        b_new = primary_button("Nowy turniej")
+        b_new.clicked.connect(self._create)
+        b_open = button("Otwórz")
+        b_open.clicked.connect(self._open)
+        b_del = button("Usuń", danger=True)
+        b_del.clicked.connect(self._delete)
+        b_ref = button("Odśwież")
+        b_ref.clicked.connect(self.refresh)
+        bar.addWidget(b_new)
+        bar.addWidget(b_open)
+        bar.addWidget(b_del)
+        bar.addWidget(b_ref)
+        bar.addStretch()
+        lay.addLayout(bar)
+
+        self.refresh()
+
+    def refresh(self):
+        self.table.setRowCount(0)
+        for t in tournament_dao.list_tournaments():
+            r = self.table.rowCount()
+            self.table.insertRow(r)
+            name_item = QTableWidgetItem(t["name"])
+            name_item.setData(UID, t["id"])
+            self.table.setItem(r, 0, name_item)
+            holder = QWidget()
+            hl = QHBoxLayout(holder)
+            hl.setContentsMargins(0, 0, 0, 0)
+            hl.addStretch()
+            hl.addWidget(status_badge(t["state"]))
+            hl.addStretch()
+            self.table.setCellWidget(r, 1, holder)
+            created = QTableWidgetItem(str(t["created_at"]))
+            created.setTextAlignment(Qt.AlignCenter)
+            self.table.setItem(r, 2, created)
+
+    def _selected_id(self):
+        row = self.table.currentRow()
+        if row < 0:
+            return None
+        return self.table.item(row, 0).data(UID)
+
+    def _create(self):
+        name, ok = QInputDialog.getText(self, "Nowy turniej", "Nazwa turnieju:")
+        if ok and name.strip():
+            tournament_dao.create_tournament(name.strip())
+            self.refresh()
+
+    def _open(self):
+        tid = self._selected_id()
+        if tid is None:
+            QMessageBox.information(self, "Info", "Wybierz turniej z listy.")
+            return
+        self.on_open(tid)
+
+    def _delete(self):
+        tid = self._selected_id()
+        if tid is None:
+            QMessageBox.information(self, "Info", "Wybierz turniej z listy.")
+            return
+        if QMessageBox.question(self, "Potwierdź",
+                                "Usunąć turniej i wszystkie jego dane?") == QMessageBox.Yes:
+            tournament_dao.delete_tournament(tid)
+            self.refresh()
+
+
+class AppWindow(QMainWindow):
+    """Główne (jedyne) okno aplikacji."""
+
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Menedżer Turnieju Piłkarskiego")
+        self.resize(1080, 700)
+
+        root = QWidget()
+        root.setObjectName("root")
+        self.setCentralWidget(root)
+        outer = QVBoxLayout(root)
+        outer.setContentsMargins(16, 12, 16, 12)
+        outer.setSpacing(8)
+
+        # stały górny pasek
+        bar = QHBoxLayout()
+        self.back_btn = button("←  Lista turniejów")
+        self.back_btn.clicked.connect(self._back)
+        self.back_btn.setVisible(False)
+        bar.addWidget(self.back_btn)
+        bar.addStretch()
+        self.theme_btn = button("🌙  Ciemny")
+        self.theme_btn.clicked.connect(self._toggle_theme)
+        bar.addWidget(self.theme_btn)
+        outer.addLayout(bar)
+
+        # przełączane strony
+        self.stack = QStackedWidget()
+        outer.addWidget(self.stack)
+        self.list_page = ListPage(on_open=self._open_tournament)
+        self.stack.addWidget(self.list_page)
+        self.tournament_page = None
+
+    def _open_tournament(self, tid):
+        if self.tournament_page is not None:
+            self.stack.removeWidget(self.tournament_page)
+            self.tournament_page.deleteLater()
+        self.tournament_page = TournamentPage(tid)
+        self.stack.addWidget(self.tournament_page)
+        self.stack.setCurrentWidget(self.tournament_page)
+        self.back_btn.setVisible(True)
+
+    def _back(self):
+        self.stack.setCurrentWidget(self.list_page)
+        self.back_btn.setVisible(False)
+        self.list_page.refresh()
+        if self.tournament_page is not None:
+            self.stack.removeWidget(self.tournament_page)
+            self.tournament_page.deleteLater()
+            self.tournament_page = None
+
+    def _toggle_theme(self):
+        mode = toggle_mode()
+        QApplication.instance().setStyleSheet(stylesheet())
+        self.theme_btn.setText("☀  Jasny" if mode == "dark" else "🌙  Ciemny")
+        self.list_page.refresh()
+        if self.tournament_page is not None:
+            self.tournament_page.refresh_all()
+
+
+def run():
+    app = QApplication.instance() or QApplication(sys.argv)
+    app.setStyleSheet(stylesheet())
+    win = AppWindow()
+    win.show()
+    app.exec()
