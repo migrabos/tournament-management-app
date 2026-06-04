@@ -1,4 +1,5 @@
 """Okno pojedynczego turnieju — zakładki z całą funkcjonalnością."""
+# pyrefly: ignore [missing-import]
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTabWidget, QLabel,
     QTableWidgetItem, QTreeWidget, QTreeWidgetItem, QHeaderView,
@@ -301,7 +302,7 @@ class TournamentPage(QWidget):
         # placeholder przed losowaniem
         self.groups_empty = empty_state(
             "Grupy nie zostały jeszcze wylosowane",
-            "Przejdź do zakładki „Losowanie", aby wylosować grupy i wygenerować terminarz.")
+            "Przejdź do zakładki 'Losowanie', aby wylosować grupy i wygenerować terminarz.")
         lay.addWidget(self.groups_empty)
 
         # właściwa zawartość — dwie kolumny: Grupa A | Grupa B
