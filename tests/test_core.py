@@ -193,3 +193,37 @@ class TestReports(DBTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestDemoTournament(DBTestCase):
+    def test_demo_tournament_is_mid_group_stage(self):
+        from app.services import demo
+        tid = demo.create_demo_tournament(seed=1)
+
+        self.assertEqual(tournament_dao.get_state(tid), "GROUP")
+        self.assertEqual(team_dao.count_teams(tid), 12)
+        fixtures = [f for f in schedule.get_schedule(tid) if f["stage"] == "GROUP"]
+        played = [f for f in fixtures if f["played"]]
+        self.assertEqual(len(fixtures), 30)
+        self.assertEqual(len(played), 18, "3 kolejki x 6 meczów")
+
+        # liczba bramek w bazie zgadza się z wynikami
+        with get_connection() as c:
+            goals = c.execute(
+                "SELECT COUNT(*) AS n FROM goal g JOIN match m ON m.id = g.match_id "
+                "WHERE m.tournament_id = ?", (tid,)
+            ).fetchone()["n"]
+        self.assertEqual(goals, sum(f["home_score"] + f["away_score"] for f in played))
+
+    def test_demo_names_do_not_clash(self):
+        from app.services import demo
+        t1 = demo.create_demo_tournament(seed=1)
+        t2 = demo.create_demo_tournament(seed=2)
+        self.assertNotEqual(tournament_dao.get_tournament(t1)["name"],
+                            tournament_dao.get_tournament(t2)["name"])
+
+    def test_demo_can_be_played_to_the_end(self):
+        """Demo z rozegraną całą grupą przechodzi w fazę KO jak zwykły turniej."""
+        from app.services import demo
+        tid = demo.create_demo_tournament(rounds_played=5, seed=3)
+        self.assertEqual(tournament_dao.get_state(tid), "KO")
