@@ -33,6 +33,20 @@ def exports_dir() -> pathlib.Path:
     return EXPORTS_DIR
 
 
+def tournaments_dir() -> pathlib.Path:
+    """Folder plików eksportu/importu turniejów: exports/turnieje/ (tworzony w razie potrzeby)."""
+    path = exports_dir() / "turnieje"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def graphics_dir(tournament_folder: str) -> pathlib.Path:
+    """Folder grafik danego turnieju: exports/grafiki/<turniej>/ (tworzony w razie potrzeby)."""
+    path = exports_dir() / "grafiki" / tournament_folder
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 # ---------------------------------------------------------------- eksport
 
 def export_tournament(tournament_id: int) -> dict:

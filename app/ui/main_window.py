@@ -58,7 +58,7 @@ class ListPage(QWidget):
         b_demo = button("Przykładowy turniej")
         b_demo.setToolTip("Tworzy gotowy turniej z drużynami i częścią rozegranych meczów")
         b_demo.clicked.connect(self._create_demo)
-        b_import = button("Importuj")
+        b_import = button("Importuj turniej")
         b_import.setToolTip("Wczytuje turniej z pliku .json jako nowy turniej")
         b_import.clicked.connect(self._import)
         b_open = button("Otwórz")
@@ -134,7 +134,7 @@ class ListPage(QWidget):
 
     def _import(self):
         path, _ = QFileDialog.getOpenFileName(
-            self, "Importuj turniej", str(backup.exports_dir()),
+            self, "Importuj turniej", str(backup.tournaments_dir()),
             "Turniej (*.json);;Wszystkie pliki (*)")
         if not path:
             return

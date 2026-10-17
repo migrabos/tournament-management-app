@@ -44,7 +44,7 @@ class TournamentPage(QWidget):
         self.badge_holder = QHBoxLayout()
         head.addLayout(self.badge_holder)
         head.addStretch()
-        self.btn_export = button("Eksportuj")
+        self.btn_export = button("Eksportuj turniej")
         self.btn_export.setToolTip("Zapisuje cały turniej do pliku .json (kopia zapasowa / do wysłania).")
         self.btn_export.clicked.connect(self._do_export)
         head.addWidget(self.btn_export)
@@ -250,7 +250,7 @@ class TournamentPage(QWidget):
     def _do_export(self):
         path, _ = QFileDialog.getSaveFileName(
             self, "Eksportuj turniej",
-            str(backup.exports_dir() / f"{self._safe_name()}.json"), "Turniej (*.json)")
+            str(backup.tournaments_dir() / f"{self._safe_name()}.json"), "Turniej (*.json)")
         if not path:
             return
         try:
@@ -656,15 +656,15 @@ class TournamentPage(QWidget):
         n = self._pick_round("Grafika kolejki")
         if n is not None:
             self._save_graphic(lambda: graphics.render_round(self.tournament_id, n),
-                               f"{self._safe_name()} - kolejka {n}.png")
+                               f"kolejka {n}.png")
 
     def _export_knockout_graphic(self):
         self._save_graphic(lambda: graphics.render_knockout(self.tournament_id),
-                           f"{self._safe_name()} - faza pucharowa.png")
+                           "faza pucharowa.png")
 
     def _export_scorers_graphic(self):
         self._save_graphic(lambda: graphics.render_scorers(self.tournament_id),
-                           f"{self._safe_name()} - strzelcy.png")
+                           "strzelcy.png")
 
     def _export_group_round_graphic(self):
         picked = self._pick_round("Grafika kolejki grupy", groups=True)
@@ -672,7 +672,7 @@ class TournamentPage(QWidget):
             return
         n, g = picked
         self._save_graphic(lambda: graphics.render_group_round(self.tournament_id, n, g),
-                           f"{self._safe_name()} - kolejka {n} grupa {g}.png")
+                           f"kolejka {n} - grupa {g}.png")
 
     def _save_graphic(self, render, filename: str):
         try:
@@ -680,16 +680,22 @@ class TournamentPage(QWidget):
         except ValueError as e:
             QMessageBox.information(self, "Grafika", str(e))
             return
-        path, _ = QFileDialog.getSaveFileName(
-            self, "Zapisz grafikę", str(backup.exports_dir() / filename), "Obraz PNG (*.png)")
-        if not path:
-            return
-        if not img.save(path, "PNG"):
+        # zapis od razu do folderu grafik turnieju (ponowny eksport nadpisuje plik)
+        folder = backup.graphics_dir(self._safe_name())
+        path = folder / filename
+        if not img.save(str(path), "PNG"):
             QMessageBox.critical(self, "Błąd", f"Nie udało się zapisać pliku:\n{path}")
             return
-        if QMessageBox.question(self, "Grafika zapisana",
-                                f"Zapisano grafikę:\n{path}\n\nOtworzyć ją teraz?") == QMessageBox.Yes:
-            QDesktopServices.openUrl(QUrl.fromLocalFile(path))
+        box = QMessageBox(QMessageBox.Information, "Grafika zapisana",
+                          f"Zapisano grafikę w folderze z grafikami:\n{path}", parent=self)
+        open_img = box.addButton("Otwórz grafikę", QMessageBox.AcceptRole)
+        open_dir = box.addButton("Otwórz folder", QMessageBox.ActionRole)
+        box.addButton("Zamknij", QMessageBox.RejectRole)
+        box.exec()
+        if box.clickedButton() is open_img:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
+        elif box.clickedButton() is open_dir:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
 
     # ---------- wspólne: wynik ----------
     def _match_subtitle(self, m) -> str:

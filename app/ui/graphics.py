@@ -285,8 +285,7 @@ def render_scorers(tournament_id: int) -> QImage:
     height = head_h + 34 + card_h + 40
 
     img, p = _new_image(height)
-    _header(p, tournament, "KLASYFIKACJA STRZELCÓW",
-            f"stan na {datetime.now():%d.%m.%Y}")
+    _header(p, tournament, "KLASYFIKACJA STRZELCÓW", f"stan na {_standing_date(tournament_id)}")
     x0 = MARGIN if two_cols else (WIDTH - col_w) / 2
     for i, col in enumerate(columns):
         x = x0 + i * (col_w + GAP)
@@ -295,6 +294,14 @@ def render_scorers(tournament_id: int) -> QImage:
         _scorers_list(p, QRectF(x, body.y(), col_w, body.height()), col)
     p.end()
     return img
+
+
+def _standing_date(tournament_id: int) -> str:
+    """Data, na którą aktualna jest klasyfikacja: dzień ostatniego rozegranego meczu
+    z terminem; gdy żaden rozegrany mecz nie ma terminu — dzisiejsza data."""
+    days = [m["scheduled_at"][:10] for m in schedule.get_schedule(tournament_id)
+            if m["played"] and m["scheduled_at"]]
+    return _date(max(days)) if days else f"{datetime.now():%d.%m.%Y}"
 
 
 def _scorers_list(p: QPainter, r: QRectF, rows: list[dict]) -> None:
