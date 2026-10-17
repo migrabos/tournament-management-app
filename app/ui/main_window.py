@@ -4,15 +4,27 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QStackedWidget,
     QTableWidgetItem, QInputDialog, QMessageBox, QHeaderView, QFileDialog,
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QSettings
 
 from app.dao import tournament_dao
 from app.services import demo, backup
-from app.ui.theme import stylesheet, toggle_mode
+from app.ui.theme import stylesheet, toggle_mode, set_mode, current_mode
 from app.ui.widgets import primary_button, button, h1, muted, table, status_badge, center_headers
 from app.ui.tournament_window import TournamentPage
 
 UID = Qt.UserRole
+
+# Ustawienia użytkownika (na Windows: rejestr HKCU\Software\TournamentManager).
+SETTINGS_ORG, SETTINGS_APP = "TournamentManager", "TournamentManager"
+THEME_KEY = "ui/theme"
+
+
+def _settings() -> QSettings:
+    return QSettings(SETTINGS_ORG, SETTINGS_APP)
+
+
+def _theme_btn_text(mode: str) -> str:
+    return "☀  Jasny" if mode == "dark" else "🌙  Ciemny"
 
 
 class ListPage(QWidget):
@@ -192,7 +204,7 @@ class AppWindow(QMainWindow):
         self.back_btn.setVisible(False)
         bar.addWidget(self.back_btn)
         bar.addStretch()
-        self.theme_btn = button("🌙  Ciemny")
+        self.theme_btn = button(_theme_btn_text(current_mode()))
         self.theme_btn.clicked.connect(self._toggle_theme)
         bar.addWidget(self.theme_btn)
         outer.addLayout(bar)
@@ -224,8 +236,9 @@ class AppWindow(QMainWindow):
 
     def _toggle_theme(self):
         mode = toggle_mode()
+        _settings().setValue(THEME_KEY, mode)       # zapamiętaj wybór na kolejne uruchomienia
         QApplication.instance().setStyleSheet(stylesheet())
-        self.theme_btn.setText("☀  Jasny" if mode == "dark" else "🌙  Ciemny")
+        self.theme_btn.setText(_theme_btn_text(mode))
         self.list_page.refresh()
         if self.tournament_page is not None:
             self.tournament_page.refresh_all()
@@ -233,6 +246,7 @@ class AppWindow(QMainWindow):
 
 def run():
     app = QApplication.instance() or QApplication(sys.argv)
+    set_mode(_settings().value(THEME_KEY, "light"))  # motyw z poprzedniej sesji
     app.setStyleSheet(stylesheet())
     win = AppWindow()
     win.showMaximized()   # start zmaksymalizowany; resize() to rozmiar po przywróceniu
