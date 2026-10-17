@@ -20,16 +20,52 @@ def group_table(tournament_id: int, group_name: str) -> list[dict]:
     return [dict(r) for r in rows]
 
 
-def top_scorers(tournament_id: int, limit: int = 20) -> list[dict]:
-    """Klasyfikacja królów strzelców w turnieju."""
+def group_table_after_round(tournament_id: int, group_name: str, round_no: int) -> list[dict]:
+    """Tabela grupy uwzględniająca tylko mecze rozegrane do kolejki round_no włącznie
+    (np. do grafiki kolejki). Kolumny i sortowanie jak w group_table."""
     with get_connection() as conn:
         rows = conn.execute(
-            """SELECT player_name, team_name, goals
+            """WITH per_team AS (
+                   SELECT t.id AS team_id, t.name AS team_name, m.id AS match_id,
+                          CASE WHEN m.home_team_id = t.id THEN m.home_score ELSE m.away_score END AS gf,
+                          CASE WHEN m.home_team_id = t.id THEN m.away_score ELSE m.home_score END AS ga
+                     FROM team t
+                     LEFT JOIN match m ON m.tournament_id = t.tournament_id
+                                 AND m.stage = 'GROUP' AND m.played = 1 AND m.round <= ?
+                                 AND (m.home_team_id = t.id OR m.away_team_id = t.id)
+                    WHERE t.tournament_id = ? AND t.group_name = ?
+               )
+               SELECT team_name,
+                      COUNT(match_id)                                         AS played,
+                      SUM(CASE WHEN gf > ga THEN 1 ELSE 0 END)                AS wins,
+                      SUM(CASE WHEN gf = ga AND match_id IS NOT NULL THEN 1 ELSE 0 END) AS draws,
+                      SUM(CASE WHEN gf < ga THEN 1 ELSE 0 END)                AS losses,
+                      COALESCE(SUM(gf), 0)                                    AS goals_for,
+                      COALESCE(SUM(ga), 0)                                    AS goals_against,
+                      COALESCE(SUM(gf - ga), 0)                               AS goal_diff,
+                      SUM(CASE WHEN gf > ga THEN 3
+                               WHEN gf = ga AND match_id IS NOT NULL THEN 1
+                               ELSE 0 END)                                    AS points
+                 FROM per_team
+                GROUP BY team_id, team_name
+                ORDER BY points DESC, goal_diff DESC, goals_for DESC, team_name""",
+            (round_no, tournament_id, group_name)
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def top_scorers(tournament_id: int, limit: int | None = None) -> list[dict]:
+    """Klasyfikacja królów strzelców w turnieju — domyślnie wszyscy, którzy strzelili gola.
+    "rank" to miejsce ex aequo (równa liczba goli = to samo miejsce: 1, 1, 3, ...)."""
+    with get_connection() as conn:
+        rows = conn.execute(
+            """SELECT RANK() OVER (ORDER BY goals DESC) AS rank,
+                      player_name, team_name, goals
                FROM v_scorers
                WHERE tournament_id = ?
                ORDER BY goals DESC, player_name
                LIMIT ?""",
-            (tournament_id, limit)
+            (tournament_id, -1 if limit is None else limit)
         ).fetchall()
     return [dict(r) for r in rows]
 
