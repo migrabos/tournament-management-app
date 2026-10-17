@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt
 
 from app.dao import tournament_dao, team_dao, player_dao
-from app.services import draw, schedule, match_result
+from app.services import draw, schedule, match_result, reset
 from app.reports import reports
 from app.ui.theme import STAGE_LABELS, BRACKETS
 from app.ui.widgets import (
@@ -39,6 +39,10 @@ class TournamentPage(QWidget):
         self.badge_holder = QHBoxLayout()
         head.addLayout(self.badge_holder)
         head.addStretch()
+        self.btn_reset = button("Resetuj turniej", danger=True)
+        self.btn_reset.setToolTip("Usuwa wyniki i grupy, wraca do losowania. Drużyny i składy zostają.")
+        self.btn_reset.clicked.connect(self._do_reset)
+        head.addWidget(self.btn_reset)
         outer.addLayout(head)
         self._badge = None
 
@@ -65,6 +69,7 @@ class TournamentPage(QWidget):
             self._badge.deleteLater()
         self._badge = status_badge(self._state())
         self.badge_holder.addWidget(self._badge)
+        self.btn_reset.setVisible(self._state() != "SETUP")
         self._refresh_teams()
         self._refresh_players()
         self._refresh_draw()
@@ -227,6 +232,24 @@ class TournamentPage(QWidget):
         pid = self.players_table.item(row, 0).data(UID)
         player_dao.delete_player(pid)
         self._refresh_players()
+
+    def _do_reset(self):
+        answer = QMessageBox.warning(
+            self, "Resetuj turniej",
+            "Usunąć wszystkie wyniki, strzelców, grupy i historię transferów\n"
+            "i wrócić do losowania?\n\n"
+            "Drużyny i zawodnicy zostaną. Tej operacji nie da się cofnąć.",
+            QMessageBox.Yes | QMessageBox.Cancel, QMessageBox.Cancel,
+        )
+        if answer != QMessageBox.Yes:
+            return
+        try:
+            reset.reset_to_setup(self.tournament_id)
+        except Exception as e:
+            QMessageBox.critical(self, "Błąd", str(e))
+            return
+        self.refresh_all()
+        self.tabs.setCurrentIndex(1)  # zakładka „Losowanie”
 
     # ---------- TAB 2: losowanie ----------
     def _build_draw_tab(self):
