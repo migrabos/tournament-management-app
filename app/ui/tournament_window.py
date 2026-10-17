@@ -517,7 +517,8 @@ class TournamentPage(QWidget):
                     if fx["played"]:
                         score = f"{fx['home_score']} : {fx['away_score']}"
                         if fx["winner_pen"] is not None:
-                            score += " k."
+                            score += (f" (k. {fx['home_pens']}:{fx['away_pens']})"
+                                      if fx["home_pens"] is not None else " k.")
                             if fx["winner_pen"] == 0:
                                 home += "  ✓"
                             else:
