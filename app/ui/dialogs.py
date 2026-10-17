@@ -193,3 +193,81 @@ class TransferDialog(QDialog):
             QMessageBox.critical(self, "Błąd transferu", str(e))
             return
         self.accept()
+
+
+class MatchDetailsDialog(QDialog):
+    """Podgląd rozegranego meczu: wynik, karne i strzelcy obu drużyn.
+    Przycisk „Edytuj wynik” zamyka okno z want_edit=True — edycję otwiera wywołujący."""
+
+    def __init__(self, parent, match_id: int, subtitle: str = ""):
+        super().__init__(parent)
+        self.want_edit = False
+        self.d = match_result.get_match_details(match_id)
+        self.setWindowTitle("Szczegóły meczu")
+        self.setMinimumWidth(560)
+        self._build(subtitle)
+
+    def _build(self, subtitle):
+        d = self.d
+        root = QVBoxLayout(self)
+        root.setContentsMargins(24, 20, 24, 20)
+        root.setSpacing(14)
+
+        if subtitle:
+            root.addWidget(muted(subtitle), alignment=Qt.AlignCenter)
+
+        # wynik: Gospodarze  2 : 1  Goście
+        score_row = QHBoxLayout()
+        home = h2(d["home_team_name"] or "?")
+        home.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        away = h2(d["away_team_name"] or "?")
+        away.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        score = QLabel(f"{d['home_score']} : {d['away_score']}" if d["played"] else "–  :  –")
+        score.setObjectName("h1")
+        score.setAlignment(Qt.AlignCenter)
+        score.setMinimumWidth(110)
+        score_row.addWidget(home, 1)
+        score_row.addWidget(score)
+        score_row.addWidget(away, 1)
+        root.addLayout(score_row)
+
+        if d["winner_pen"] is not None:
+            winner = d["home_team_name"] if d["winner_pen"] == 0 else d["away_team_name"]
+            root.addWidget(muted(f"Po rzutach karnych wygrywa {winner}"),
+                           alignment=Qt.AlignCenter)
+
+        if not d["played"]:
+            root.addWidget(muted("Mecz nie został jeszcze rozegrany."), alignment=Qt.AlignCenter)
+        else:
+            cols = QHBoxLayout()
+            cols.setSpacing(14)
+            for scorers, align, home_side in (
+                    (d["home_scorers"], Qt.AlignRight, True),
+                    (d["away_scorers"], Qt.AlignLeft, False)):
+                frame, lay = card(padding=14)
+                if not scorers:
+                    lay.addWidget(muted("brak bramek"), alignment=align)
+                for s in scorers:
+                    name = s["name"] + (f"  ×{s['goals']}" if s["goals"] > 1 else "")
+                    text = f"{name}  ⚽" if home_side else f"⚽  {name}"   # lustrzanie
+                    lbl = QLabel(text)
+                    lbl.setAlignment(align)
+                    lay.addWidget(lbl)
+                lay.addStretch()
+                cols.addWidget(frame, 1)
+            root.addLayout(cols)
+
+        btns = QHBoxLayout()
+        btns.addStretch()
+        close = button("Zamknij")
+        close.clicked.connect(self.reject)
+        btns.addWidget(close)
+        if d["home_team_id"] is not None and d["away_team_id"] is not None:
+            edit = primary_button("Edytuj wynik" if d["played"] else "Wpisz wynik")
+            edit.clicked.connect(self._edit)
+            btns.addWidget(edit)
+        root.addLayout(btns)
+
+    def _edit(self):
+        self.want_edit = True
+        self.accept()
