@@ -1,5 +1,7 @@
 """Jedno okno aplikacji: stały pasek (motyw + nawigacja) i przełączane strony."""
 import sys
+import pathlib
+
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QStackedWidget,
     QTableWidgetItem, QInputDialog, QMessageBox, QHeaderView, QFileDialog,
@@ -13,6 +15,7 @@ from app.ui.widgets import (
     primary_button, button, h1, muted, table, status_badge, center_headers, PAGE_MARGIN_X,
 )
 from app.ui.tournament_window import TournamentPage
+from PySide6.QtGui import QIcon
 
 UID = Qt.UserRole
 
@@ -245,10 +248,22 @@ class AppWindow(QMainWindow):
         self.list_page.refresh()
         if self.tournament_page is not None:
             self.tournament_page.refresh_all()
-
+def _icon_path() -> pathlib.Path:
+    """Ikonka aplikacji: w exe rozpakowana przez PyInstaller, przy `python main.py` z folderu assets."""
+    if getattr(sys, "frozen", False):
+        return pathlib.Path(sys._MEIPASS) / "assets" / "icon.ico"
+    return pathlib.Path(__file__).resolve().parents[2] / "assets" / "icon.ico"
 
 def run():
+    if sys.platform == "win32":
+        # bez tego Windows przy `python main.py` pokazuje na pasku zadań ikonkę Pythona
+        import ctypes
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("migrabos.tournament_manager")
+
     app = QApplication.instance() or QApplication(sys.argv)
+    icon = _icon_path()
+    if icon.exists():
+        app.setWindowIcon(QIcon(str(icon)))   # pasek tytułowy, pasek zadań i wszystkie okienka
     set_mode(_settings().value(THEME_KEY, "light"))  # motyw z poprzedniej sesji
     app.setStyleSheet(stylesheet())
     win = AppWindow()
