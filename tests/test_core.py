@@ -666,3 +666,27 @@ class TestTopScorersAll(DBTestCase):
             else:
                 self.assertEqual(cur["rank"], rows.index(cur) + 1)
         self.assertEqual(len(reports.top_scorers(tid, limit=5)), 5)
+
+
+class TestScheduleHomeAway(DBTestCase):
+    def test_home_away_balanced_max_two_in_a_row(self):
+        tid, _ = self._make_tournament()
+        draw.draw_groups(tid)
+        schedule.generate_group_schedule(tid)
+        fixtures = [f for f in schedule.get_schedule(tid) if f["stage"] == "GROUP"]
+        for g in ("A", "B"):
+            games = [f for f in fixtures if f["group_name"] == g]
+            teams = {f["home_team_id"] for f in games} | {f["away_team_id"] for f in games}
+            self.assertEqual(len(teams), 6)
+            # każda para gra dokładnie raz
+            pairs = [frozenset((f["home_team_id"], f["away_team_id"])) for f in games]
+            self.assertEqual(len(pairs), 15)
+            self.assertEqual(len(set(pairs)), 15)
+            for t in teams:
+                seq = "".join("H" if f["home_team_id"] == t else "A"
+                              for f in sorted(games, key=lambda f: f["round"])
+                              if t in (f["home_team_id"], f["away_team_id"]))
+                self.assertEqual(len(seq), 5)
+                self.assertNotIn("HHH", seq, f"drużyna {t}: {seq}")
+                self.assertNotIn("AAA", seq, f"drużyna {t}: {seq}")
+                self.assertIn(seq.count("H"), (2, 3), f"drużyna {t}: {seq}")

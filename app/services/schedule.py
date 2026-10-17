@@ -7,6 +7,11 @@ def _berger_rounds(team_ids: list[int]) -> list[list[tuple[int, int]]]:
     """
     Algorytm Bergera: generuje kolejki round-robin dla n drużyn.
     Zwraca listę kolejek, każda kolejka to lista par (home_id, away_id).
+
+    Gospodarz jest dobierany naprzemiennie, żeby nikt nie grał wszystkiego u siebie
+    ani na wyjeździe: drużyna stała (teams[0]) zmienia rolę co kolejkę, a w pozostałych
+    parach rola zależy od pozycji pary. Dla 6 drużyn: najwyżej 2 mecze z rzędu
+    u siebie / na wyjeździe, każda drużyna gra 2 lub 3 razy u siebie.
     """
     n = len(team_ids)
     teams = team_ids[:]
@@ -15,13 +20,18 @@ def _berger_rounds(team_ids: list[int]) -> list[list[tuple[int, int]]]:
     half = len(teams) // 2
     rounds = []
 
-    for _ in range(len(teams) - 1):
+    for r in range(len(teams) - 1):
         pairs = []
         for i in range(half):
-            home = teams[i]
-            away = teams[len(teams) - 1 - i]
-            if home is not None and away is not None:
-                pairs.append((home, away))
+            a = teams[i]
+            b = teams[len(teams) - 1 - i]
+            if a is None or b is None:
+                continue
+            if i == 0:
+                home_first = r % 2 == 0      # drużyna stała: co kolejkę na zmianę
+            else:
+                home_first = i % 2 == 1      # pozostałe pary: wg pozycji
+            pairs.append((a, b) if home_first else (b, a))
         rounds.append(pairs)
         # rotacja: pierwszy element stały, reszta przesuwa się w prawo
         teams = [teams[0]] + [teams[-1]] + teams[1:-1]
