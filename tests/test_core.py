@@ -450,3 +450,44 @@ class TestRenameTournament(DBTestCase):
         self.assertFalse(tournament_dao.name_taken("Turniej"))
         tournament_dao.create_tournament("Puchar Łodzi")
         self.assertTrue(tournament_dao.name_taken("PUCHAR ŁODZI"))
+
+class TestMatchDetails(DBTestCase):
+    def test_scorers_split_by_side_with_counts(self):
+        tid, teams = self._make_tournament()
+        draw.draw_groups(tid)
+        schedule.generate_group_schedule(tid)
+        fx = next(f for f in schedule.get_schedule(tid) if f["stage"] == "GROUP")
+        home_players = [p["id"] for p in player_dao.list_players(fx["home_team_id"])]
+        away_players = [p["id"] for p in player_dao.list_players(fx["away_team_id"])]
+        match_result.save_match_result(
+            fx["match_id"], 3, 1, [home_players[0], home_players[1], home_players[0], away_players[0]])
+
+        d = match_result.get_match_details(fx["match_id"])
+        self.assertEqual((d["home_score"], d["away_score"]), (3, 1))
+        self.assertEqual([s["goals"] for s in d["home_scorers"]], [2, 1])   # najpierw dublet
+        self.assertEqual(len(d["away_scorers"]), 1)
+        self.assertEqual(d["home_team_name"], fx["home_team_name"])
+
+    def test_scorer_stays_on_original_side_after_transfer(self):
+        tid, teams = self._make_tournament()
+        draw.draw_groups(tid)
+        schedule.generate_group_schedule(tid)
+        fx = next(f for f in schedule.get_schedule(tid) if f["stage"] == "GROUP")
+        scorer = self._first_player(fx["home_team_id"])
+        match_result.save_match_result(fx["match_id"], 1, 0, [scorer])
+        elsewhere = next(t for t in teams if t not in (fx["home_team_id"], fx["away_team_id"]))
+        transfer.transfer_player(scorer, elsewhere)
+
+        d = match_result.get_match_details(fx["match_id"])
+        self.assertEqual(len(d["home_scorers"]), 1)
+        self.assertEqual(d["away_scorers"], [])
+
+    def test_unplayed_and_missing(self):
+        tid, _ = self._make_tournament()
+        draw.draw_groups(tid)
+        schedule.generate_group_schedule(tid)
+        fx = next(f for f in schedule.get_schedule(tid) if f["stage"] == "GROUP")
+        d = match_result.get_match_details(fx["match_id"])
+        self.assertFalse(d["played"])
+        self.assertEqual((d["home_scorers"], d["away_scorers"]), ([], []))
+        self.assertIsNone(match_result.get_match_details(999999))

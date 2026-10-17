@@ -14,7 +14,7 @@ from app.ui.theme import STAGE_LABELS, BRACKETS
 from app.ui.widgets import (
     primary_button, button, h1, h2, muted, status_badge, table, center_headers, empty_state,
 )
-from app.ui.dialogs import ResultDialog, TransferDialog
+from app.ui.dialogs import ResultDialog, TransferDialog, MatchDetailsDialog
 
 UID = Qt.UserRole
 
@@ -353,7 +353,7 @@ class TournamentPage(QWidget):
         cl.setContentsMargins(0, 0, 0, 0)
         cl.setSpacing(8)
         top = QHBoxLayout()
-        top.addWidget(muted("Dwuklik meczu, aby wpisać lub edytować wynik."))
+        top.addWidget(muted("Dwuklik meczu: wpisanie wyniku lub szczegóły z listą strzelców."))
         top.addStretch()
         self.group_progress = muted("")
         top.addWidget(self.group_progress)
@@ -389,7 +389,7 @@ class TournamentPage(QWidget):
             fx.horizontalHeaderItem(1).setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
             fx.horizontalHeaderItem(3).setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)
             fx.cellDoubleClicked.connect(
-                lambda r, _c, t=fx: self._enter_result(t.item(r, 0).data(UID)))
+                lambda r, _c, t=fx: self._open_match(t.item(r, 0).data(UID)))
             self.group_fixtures[gname] = fx
             box.addWidget(fx)
 
@@ -471,7 +471,7 @@ class TournamentPage(QWidget):
         lay = QVBoxLayout(page)
         lay.setContentsMargins(14, 14, 14, 14)
         lay.setSpacing(10)
-        lay.addWidget(muted("Dwuklik meczu z obiema drużynami — wpisz lub edytuj wynik."))
+        lay.addWidget(muted("Dwuklik meczu z obiema drużynami: wpisanie wyniku lub szczegóły z listą strzelców."))
         self.ko_tree = QTreeWidget()
         self.ko_tree.setColumnCount(4)
         self.ko_tree.setHeaderLabels(["Faza", "Gospodarze", "Wynik", "Goście"])
@@ -494,7 +494,7 @@ class TournamentPage(QWidget):
     def _ko_double(self, item, _col):
         mid = item.data(0, UID)
         if mid is not None:
-            self._enter_result(mid)
+            self._open_match(mid)
 
     def _refresh_ko(self):
         self.ko_tree.clear()
@@ -590,7 +590,26 @@ class TournamentPage(QWidget):
             self.refresh_all()
 
     # ---------- wspólne: wynik ----------
-    def _enter_result(self, match_id):
+    def _open_match(self, match_id):
+        """Dwuklik meczu: rozegrany → szczegóły, nierozegrany → wpisanie wyniku."""
+        if match_id is None:
+            return
+        m = match_result.get_match(match_id)
+        if m is None:
+            return
+        if not m["played"]:
+            self._enter_result(match_id)
+            return
+        if m["stage"] == "GROUP":
+            subtitle = f"Grupa {m['group_name']} · kolejka {m['round']}"
+        else:
+            subtitle = STAGE_LABELS.get(m["stage"], m["stage"])
+        dlg = MatchDetailsDialog(self, match_id, subtitle)
+        dlg.exec()
+        if dlg.want_edit:
+            self._enter_result(match_id, ask=False)
+
+    def _enter_result(self, match_id, ask: bool = True):
         if match_id is None:
             return
         m = match_result.get_match(match_id)
@@ -604,8 +623,8 @@ class TournamentPage(QWidget):
             if not editable:
                 QMessageBox.information(self, "Wynik zablokowany", reason)
                 return
-            if QMessageBox.question(self, "Edycja wyniku",
-                                    "Wynik jest już wpisany. Edytować?") != QMessageBox.Yes:
+            if ask and QMessageBox.question(self, "Edycja wyniku",
+                                            "Wynik jest już wpisany. Edytować?") != QMessageBox.Yes:
                 return
             dlg = ResultDialog(self, match_id, edit=True)
         else:

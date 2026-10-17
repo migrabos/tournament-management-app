@@ -312,3 +312,43 @@ def get_match_scorer_counts(match_id: int) -> dict[int, int]:
             (match_id,)
         ).fetchall()
     return {row["scorer_id"]: row["n"] for row in rows}
+
+def get_match_details(match_id: int) -> dict | None:
+    """
+    Szczegóły meczu do wyświetlenia: drużyny, wynik, karne i strzelcy
+    rozdzieleni na gospodarzy i gości ({"name", "goals"}, posortowani malejąco).
+
+    Strona strzelca: jego obecna drużyna, a jeśli od tamtej pory przeszedł
+    transferem gdzie indziej — drużyna meczu, z której odszedł.
+    """
+    with get_connection() as conn:
+        m = conn.execute(
+            """SELECT m.*, ht.name AS home_team_name, at.name AS away_team_name
+               FROM match m
+               LEFT JOIN team ht ON ht.id = m.home_team_id
+               LEFT JOIN team at ON at.id = m.away_team_id
+               WHERE m.id = ?""",
+            (match_id,)
+        ).fetchone()
+        if m is None:
+            return None
+        rows = conn.execute(
+            """SELECT p.id, p.name, p.team_id, COUNT(*) AS goals,
+                      (SELECT tr.from_team_id FROM transfer tr
+                        WHERE tr.player_id = p.id AND tr.from_team_id IN (?, ?)
+                        ORDER BY tr.id LIMIT 1) AS former_team_id
+               FROM goal g JOIN player p ON p.id = g.scorer_id
+               WHERE g.match_id = ?
+               GROUP BY p.id
+               ORDER BY goals DESC, p.name""",
+            (m["home_team_id"], m["away_team_id"], match_id)
+        ).fetchall()
+
+    details = dict(m)
+    details["home_scorers"], details["away_scorers"] = [], []
+    for r in rows:
+        team = r["team_id"] if r["team_id"] in (m["home_team_id"], m["away_team_id"]) \
+            else r["former_team_id"]
+        side = "home_scorers" if team == m["home_team_id"] else "away_scorers"
+        details[side].append({"name": r["name"], "goals": r["goals"]})
+    return details
