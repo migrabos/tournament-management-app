@@ -63,6 +63,7 @@ class DBTestCase(unittest.TestCase):
                 continue
             scorer = self._first_player(fx["home_team_id"])
             match_result.save_match_result(fx["match_id"], 1, 0, [scorer])
+        match_result.confirm_group_stage(tid)
 
 
 class TestCrudAndCascade(DBTestCase):
@@ -223,9 +224,11 @@ class TestDemoTournament(DBTestCase):
                             tournament_dao.get_tournament(t2)["name"])
 
     def test_demo_can_be_played_to_the_end(self):
-        """Demo z rozegraną całą grupą przechodzi w fazę KO jak zwykły turniej."""
+        """Demo z rozegraną całą grupą da się zatwierdzić jak zwykły turniej."""
         from app.services import demo
         tid = demo.create_demo_tournament(rounds_played=5, seed=3)
+        self.assertEqual(tournament_dao.get_state(tid), "GROUP")
+        match_result.confirm_group_stage(tid)
         self.assertEqual(tournament_dao.get_state(tid), "KO")
 
 
@@ -263,3 +266,56 @@ class TestReset(DBTestCase):
         tid, _ = self._make_tournament()
         with self.assertRaises(ValueError):
             reset.reset_to_setup(tid)
+
+
+class TestConfirmGroupStage(DBTestCase):
+    def _all_group_results(self, tid):
+        """Wpisuje wszystkie wyniki grupowe (1:0), BEZ zatwierdzania."""
+        for fx in schedule.get_schedule(tid):
+            if fx["stage"] == "GROUP":
+                scorer = self._first_player(fx["home_team_id"])
+                match_result.save_match_result(fx["match_id"], 1, 0, [scorer])
+
+    def _setup(self):
+        tid, _ = self._make_tournament()
+        draw.draw_groups(tid)
+        schedule.generate_group_schedule(tid)
+        return tid
+
+    def test_last_result_does_not_start_knockout(self):
+        tid = self._setup()
+        self._all_group_results(tid)
+        self.assertEqual(tournament_dao.get_state(tid), "GROUP")
+        self.assertEqual(match_result.group_stage_status(tid), (30, 30))
+
+    def test_results_editable_until_confirmed(self):
+        tid = self._setup()
+        self._all_group_results(tid)
+        fx = next(f for f in schedule.get_schedule(tid) if f["stage"] == "GROUP")
+        away = self._first_player(fx["away_team_id"])
+
+        # przed zatwierdzeniem: poprawka ostatniego wyniku jest możliwa
+        match_result.edit_match_result(fx["match_id"], 0, 1, [away])
+
+        match_result.confirm_group_stage(tid)
+        self.assertEqual(tournament_dao.get_state(tid), "KO")
+        editable, _ = match_result.can_edit_match(fx["match_id"])
+        self.assertFalse(editable)
+        home = self._first_player(fx["home_team_id"])
+        with self.assertRaisesRegex(ValueError, "zatwierdzona"):
+            match_result.edit_match_result(fx["match_id"], 1, 0, [home])
+
+    def test_confirm_requires_all_results(self):
+        tid = self._setup()
+        fx = next(f for f in schedule.get_schedule(tid) if f["stage"] == "GROUP")
+        match_result.save_match_result(fx["match_id"], 0, 0, [])
+        with self.assertRaises(ValueError):
+            match_result.confirm_group_stage(tid)
+        self.assertEqual(tournament_dao.get_state(tid), "GROUP")
+
+    def test_confirm_twice_is_rejected(self):
+        tid = self._setup()
+        self._all_group_results(tid)
+        match_result.confirm_group_stage(tid)
+        with self.assertRaises(ValueError):
+            match_result.confirm_group_stage(tid)
