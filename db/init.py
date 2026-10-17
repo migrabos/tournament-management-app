@@ -1,9 +1,18 @@
 import sqlite3
 import pathlib
+import sys
 import time
 
-DB_PATH = pathlib.Path(__file__).parent / "tournament.db"
-SCHEMA_PATH = pathlib.Path(__file__).parent / "schema.sql"
+if getattr(sys, "frozen", False):
+    # Uruchomione jako .exe (PyInstaller)
+    BUNDLE_DIR = pathlib.Path(sys._MEIPASS) / "db"       # schema.sql spakowany w exe
+    DATA_DIR = pathlib.Path(sys.executable).parent       # baza obok pliku .exe
+else:
+    # Zwykłe uruchomienie: python main.py
+    BUNDLE_DIR = DATA_DIR = pathlib.Path(__file__).parent
+
+DB_PATH = DATA_DIR / "tournament.db"
+SCHEMA_PATH = BUNDLE_DIR / "schema.sql"
 
 
 def get_connection() -> sqlite3.Connection:
