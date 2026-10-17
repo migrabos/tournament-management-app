@@ -3,12 +3,12 @@
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTabWidget, QLabel,
     QTableWidgetItem, QTreeWidget, QTreeWidgetItem, QHeaderView,
-    QInputDialog, QMessageBox, QSplitter,
+    QInputDialog, QMessageBox, QSplitter, QFileDialog,
 )
 from PySide6.QtCore import Qt
 
 from app.dao import tournament_dao, team_dao, player_dao
-from app.services import draw, schedule, match_result, reset
+from app.services import draw, schedule, match_result, reset, backup
 from app.reports import reports
 from app.ui.theme import STAGE_LABELS, BRACKETS
 from app.ui.widgets import (
@@ -39,6 +39,10 @@ class TournamentPage(QWidget):
         self.badge_holder = QHBoxLayout()
         head.addLayout(self.badge_holder)
         head.addStretch()
+        self.btn_export = button("Eksportuj")
+        self.btn_export.setToolTip("Zapisuje cały turniej do pliku .json (kopia zapasowa / do wysłania).")
+        self.btn_export.clicked.connect(self._do_export)
+        head.addWidget(self.btn_export)
         self.btn_reset = button("Resetuj turniej", danger=True)
         self.btn_reset.setToolTip("Usuwa wyniki i grupy, wraca do losowania. Drużyny i składy zostają.")
         self.btn_reset.clicked.connect(self._do_reset)
@@ -232,6 +236,20 @@ class TournamentPage(QWidget):
         pid = self.players_table.item(row, 0).data(UID)
         player_dao.delete_player(pid)
         self._refresh_players()
+
+    def _do_export(self):
+        name = tournament_dao.get_tournament(self.tournament_id)["name"]
+        safe = "".join(c if c.isalnum() or c in " -_()" else "_" for c in name).strip()
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Eksportuj turniej", f"{safe or 'turniej'}.json", "Turniej (*.json)")
+        if not path:
+            return
+        try:
+            backup.export_to_file(self.tournament_id, path)
+        except Exception as e:
+            QMessageBox.critical(self, "Błąd eksportu", str(e))
+            return
+        QMessageBox.information(self, "Eksport", f"Zapisano turniej do pliku:\n{path}")
 
     def _do_reset(self):
         answer = QMessageBox.warning(

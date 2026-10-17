@@ -2,12 +2,12 @@
 import sys
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QStackedWidget,
-    QTableWidgetItem, QInputDialog, QMessageBox, QHeaderView,
+    QTableWidgetItem, QInputDialog, QMessageBox, QHeaderView, QFileDialog,
 )
 from PySide6.QtCore import Qt
 
 from app.dao import tournament_dao
-from app.services import demo
+from app.services import demo, backup
 from app.ui.theme import stylesheet, toggle_mode
 from app.ui.widgets import primary_button, button, h1, muted, table, status_badge, center_headers
 from app.ui.tournament_window import TournamentPage
@@ -44,6 +44,9 @@ class ListPage(QWidget):
         b_demo = button("Przykładowy turniej")
         b_demo.setToolTip("Tworzy gotowy turniej z drużynami i częścią rozegranych meczów")
         b_demo.clicked.connect(self._create_demo)
+        b_import = button("Importuj")
+        b_import.setToolTip("Wczytuje turniej z pliku .json jako nowy turniej")
+        b_import.clicked.connect(self._import)
         b_open = button("Otwórz")
         b_open.clicked.connect(self._open)
         b_del = button("Usuń", danger=True)
@@ -52,6 +55,7 @@ class ListPage(QWidget):
         b_ref.clicked.connect(self.refresh)
         bar.addWidget(b_new)
         bar.addWidget(b_demo)
+        bar.addWidget(b_import)
         bar.addWidget(b_open)
         bar.addWidget(b_del)
         bar.addWidget(b_ref)
@@ -100,6 +104,19 @@ class ListPage(QWidget):
             QMessageBox.warning(self, "Błąd", f"Nie udało się utworzyć turnieju:\n{e}")
             return
         QApplication.restoreOverrideCursor()
+        self.refresh()
+        self.on_open(tid)
+
+    def _import(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Importuj turniej", "", "Turniej (*.json);;Wszystkie pliki (*)")
+        if not path:
+            return
+        try:
+            tid = backup.import_from_file(path)
+        except Exception as e:
+            QMessageBox.warning(self, "Błąd importu", f"Nie udało się zaimportować turnieju:\n{e}")
+            return
         self.refresh()
         self.on_open(tid)
 
