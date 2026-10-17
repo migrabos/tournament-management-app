@@ -45,7 +45,8 @@ def save_match_result(
     """
     Atomowo zapisuje wynik meczu i listę strzelców.
     winner_pen: 0 = home wygrał karne, 1 = away wygrał karne, None = bez karnych.
-    Jeśli to ostatni mecz fazy grupowej — automatycznie tworzy drabinki KO.
+    Faza grupowa NIE kończy się sama — drabinki KO tworzy dopiero
+    confirm_group_stage() (przycisk „Zatwierdź fazę grupową”).
     Retry przy sqlite3.OperationalError (database is locked).
     """
     with_retry(_do_save_match_result, match_id, home_score, away_score,
@@ -92,18 +93,6 @@ def _do_save_match_result(
                 (match_id, scorer_id)
             )
 
-        # Sprawdź czy to ostatni mecz fazy grupowej w turnieju
-        if stage == "GROUP":
-            remaining = conn.execute(
-                """SELECT COUNT(*) as cnt FROM match
-                   WHERE tournament_id = ? AND stage = 'GROUP' AND played = 0
-                   AND id != ?""",
-                (tournament_id, match_id)
-            ).fetchone()["cnt"]
-
-            if remaining == 0:
-                seed_brackets(tournament_id, conn)
-
         conn.commit()
 
         # Propagacja po meczu SF (poza główną transakcją — bracket otwiera własną)
@@ -121,13 +110,69 @@ def _do_save_match_result(
         _check_tournament_finished(tournament_id)
 
 
+def group_stage_status(tournament_id: int) -> tuple[int, int]:
+    """Zwraca (rozegrane, wszystkie) mecze fazy grupowej turnieju."""
+    with get_connection() as conn:
+        row = conn.execute(
+            """SELECT COALESCE(SUM(played), 0) AS played, COUNT(*) AS total
+               FROM match WHERE tournament_id = ? AND stage = 'GROUP'""",
+            (tournament_id,)
+        ).fetchone()
+    return row["played"], row["total"]
+
+
+def confirm_group_stage(tournament_id: int) -> None:
+    """
+    Zatwierdza fazę grupową: tworzy drabinki KO i przestawia turniej na KO.
+    Od tej chwili wyniki grupowe są zablokowane (patrz can_edit_match).
+    Wymaga stanu GROUP i kompletu rozegranych meczów grupowych.
+    Retry przy sqlite3.OperationalError (database is locked).
+    """
+    with_retry(_do_confirm_group_stage, tournament_id)
+
+
+def _do_confirm_group_stage(tournament_id: int) -> None:
+    conn = get_connection()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+
+        state = conn.execute(
+            "SELECT state FROM tournament WHERE id = ?", (tournament_id,)
+        ).fetchone()
+        if state is None:
+            raise ValueError(f"Turniej {tournament_id} nie istnieje.")
+        if state["state"] != "GROUP":
+            raise ValueError("Zatwierdzić można tylko turniej w fazie grupowej.")
+
+        row = conn.execute(
+            """SELECT COUNT(*) AS total, COALESCE(SUM(played), 0) AS played
+               FROM match WHERE tournament_id = ? AND stage = 'GROUP'""",
+            (tournament_id,)
+        ).fetchone()
+        if row["total"] == 0:
+            raise ValueError("Najpierw wygeneruj terminarz fazy grupowej.")
+        if row["played"] < row["total"]:
+            raise ValueError(
+                f"Wpisz wszystkie wyniki fazy grupowej "
+                f"(rozegrano {row['played']} z {row['total']} meczów).")
+
+        seed_brackets(tournament_id, conn)
+        conn.commit()
+
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
 def can_edit_match(match_id: int) -> tuple[bool, str]:
     """Czy wynik rozegranego meczu można jeszcze edytować.
     Zwraca (True, "") albo (False, powód).
 
     Reguły:
       - mecz grupowy: edytowalny dopóki turniej jest w fazie GROUP
-        (po wpisaniu ostatniego wyniku drabinki są rozstawione i wyniki grup się blokują);
+        (po zatwierdzeniu fazy grupowej drabinki są rozstawione i wyniki grup się blokują);
       - półfinał KO: edytowalny dopóki zależny finał i mecz o miejsce NIE są rozegrane
         (inaczej zmiana zwycięzcy podmieniłaby uczestnika już rozstrzygniętego meczu);
       - finał / mecz o miejsce: edytowalny zawsze (brak meczów zależnych).
@@ -144,7 +189,8 @@ def can_edit_match(match_id: int) -> tuple[bool, str]:
                 "SELECT state FROM tournament WHERE id = ?", (m["tournament_id"],)
             ).fetchone()["state"]
             if state != "GROUP":
-                return False, "Wyniki grupowe są zablokowane po rozstawieniu drabinek."
+                return False, ("Faza grupowa została zatwierdzona — wyniki grup są zablokowane. "
+                               "Aby je zmienić, zresetuj turniej.")
             return True, ""
 
         if m["stage"] in SF_STAGES:
