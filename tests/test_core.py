@@ -227,3 +227,39 @@ class TestDemoTournament(DBTestCase):
         from app.services import demo
         tid = demo.create_demo_tournament(rounds_played=5, seed=3)
         self.assertEqual(tournament_dao.get_state(tid), "KO")
+
+
+class TestReset(DBTestCase):
+    def test_reset_returns_to_setup_and_keeps_squads(self):
+        from app.services import reset
+        tid, teams = self._make_tournament()
+        draw.draw_groups(tid)
+        schedule.generate_group_schedule(tid)
+        transfer.transfer_player(self._first_player(teams[0]), teams[1])
+        self._play_all_group_matches(tid)          # -> faza KO
+        squads_before = {t: player_dao.count_players(t) for t in teams}
+
+        reset.reset_to_setup(tid)
+
+        self.assertEqual(tournament_dao.get_state(tid), "SETUP")
+        with get_connection() as c:
+            for table in ("match", "transfer"):
+                n = c.execute(f"SELECT COUNT(*) AS n FROM {table} WHERE tournament_id = ?",
+                              (tid,)).fetchone()["n"]
+                self.assertEqual(n, 0, table)
+            self.assertEqual(c.execute("SELECT COUNT(*) AS n FROM goal").fetchone()["n"], 0)
+        self.assertTrue(all(t["group_name"] is None for t in team_dao.list_teams(tid)))
+        # składy (łącznie z transferem) bez zmian
+        self.assertEqual({t: player_dao.count_players(t) for t in teams}, squads_before)
+
+        # turniej da się rozegrać od nowa
+        draw.draw_groups(tid)
+        schedule.generate_group_schedule(tid)
+        self._play_all_group_matches(tid)
+        self.assertEqual(tournament_dao.get_state(tid), "KO")
+
+    def test_reset_in_setup_is_rejected(self):
+        from app.services import reset
+        tid, _ = self._make_tournament()
+        with self.assertRaises(ValueError):
+            reset.reset_to_setup(tid)
