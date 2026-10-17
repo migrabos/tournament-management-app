@@ -7,6 +7,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt
 
 from app.dao import tournament_dao
+from app.services import demo
 from app.ui.theme import stylesheet, toggle_mode
 from app.ui.widgets import primary_button, button, h1, muted, table, status_badge, center_headers
 from app.ui.tournament_window import TournamentPage
@@ -40,6 +41,9 @@ class ListPage(QWidget):
         bar = QHBoxLayout()
         b_new = primary_button("Nowy turniej")
         b_new.clicked.connect(self._create)
+        b_demo = button("Przykładowy turniej")
+        b_demo.setToolTip("Tworzy gotowy turniej z drużynami i częścią rozegranych meczów")
+        b_demo.clicked.connect(self._create_demo)
         b_open = button("Otwórz")
         b_open.clicked.connect(self._open)
         b_del = button("Usuń", danger=True)
@@ -47,6 +51,7 @@ class ListPage(QWidget):
         b_ref = button("Odśwież")
         b_ref.clicked.connect(self.refresh)
         bar.addWidget(b_new)
+        bar.addWidget(b_demo)
         bar.addWidget(b_open)
         bar.addWidget(b_del)
         bar.addWidget(b_ref)
@@ -85,6 +90,18 @@ class ListPage(QWidget):
         if ok and name.strip():
             tournament_dao.create_tournament(name.strip())
             self.refresh()
+
+    def _create_demo(self):
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            tid = demo.create_demo_tournament()
+        except Exception as e:
+            QApplication.restoreOverrideCursor()
+            QMessageBox.warning(self, "Błąd", f"Nie udało się utworzyć turnieju:\n{e}")
+            return
+        QApplication.restoreOverrideCursor()
+        self.refresh()
+        self.on_open(tid)
 
     def _open(self):
         tid = self._selected_id()
