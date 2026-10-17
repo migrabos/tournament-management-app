@@ -641,3 +641,28 @@ class TestGroupTableAfterRound(DBTestCase):
             # przed pierwszą kolejką — same zera
             self.assertTrue(all(r["played"] == 0 and r["points"] == 0
                                 for r in reports.group_table_after_round(tid, g, 0)))
+
+
+class TestTopScorersAll(DBTestCase):
+    def test_all_scorers_listed_with_shared_rank(self):
+        tid, teams = self._make_tournament(players_per_team=10)
+        draw.draw_groups(tid)
+        schedule.generate_group_schedule(tid)
+        # w każdym meczu gola strzela każdy zawodnik gospodarzy → >20 strzelców,
+        # różne liczby goli (zależnie od liczby meczów u siebie) i remisy w klasyfikacji
+        for fx in schedule.get_schedule(tid):
+            if fx["stage"] == "GROUP":
+                ids = [p["id"] for p in player_dao.list_players(fx["home_team_id"])]
+                match_result.save_match_result(fx["match_id"], len(ids), 0, ids)
+        rows = reports.top_scorers(tid)
+        with get_connection() as c:
+            distinct = c.execute("SELECT COUNT(DISTINCT scorer_id) AS n FROM goal").fetchone()["n"]
+        self.assertGreater(distinct, 20)
+        self.assertEqual(len(rows), distinct)
+        # miejsce ex aequo: równe gole = to samo miejsce, kolejne miejsce przeskakuje
+        for prev, cur in zip(rows, rows[1:]):
+            if cur["goals"] == prev["goals"]:
+                self.assertEqual(cur["rank"], prev["rank"])
+            else:
+                self.assertEqual(cur["rank"], rows.index(cur) + 1)
+        self.assertEqual(len(reports.top_scorers(tid, limit=5)), 5)

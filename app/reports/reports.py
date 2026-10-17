@@ -54,16 +54,18 @@ def group_table_after_round(tournament_id: int, group_name: str, round_no: int) 
     return [dict(r) for r in rows]
 
 
-def top_scorers(tournament_id: int, limit: int = 20) -> list[dict]:
-    """Klasyfikacja królów strzelców w turnieju."""
+def top_scorers(tournament_id: int, limit: int | None = None) -> list[dict]:
+    """Klasyfikacja królów strzelców w turnieju — domyślnie wszyscy, którzy strzelili gola.
+    "rank" to miejsce ex aequo (równa liczba goli = to samo miejsce: 1, 1, 3, ...)."""
     with get_connection() as conn:
         rows = conn.execute(
-            """SELECT player_name, team_name, goals
+            """SELECT RANK() OVER (ORDER BY goals DESC) AS rank,
+                      player_name, team_name, goals
                FROM v_scorers
                WHERE tournament_id = ?
                ORDER BY goals DESC, player_name
                LIMIT ?""",
-            (tournament_id, limit)
+            (tournament_id, -1 if limit is None else limit)
         ).fetchall()
     return [dict(r) for r in rows]
 
