@@ -9,7 +9,9 @@ from PySide6.QtCore import Qt, QSettings
 from app.dao import tournament_dao
 from app.services import demo, backup
 from app.ui.theme import stylesheet, toggle_mode, set_mode, current_mode
-from app.ui.widgets import primary_button, button, h1, muted, table, status_badge, center_headers
+from app.ui.widgets import (
+    primary_button, button, h1, muted, table, status_badge, center_headers, PAGE_MARGIN_X,
+)
 from app.ui.tournament_window import TournamentPage
 
 UID = Qt.UserRole
@@ -36,7 +38,7 @@ class ListPage(QWidget):
         self.on_open = on_open
 
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(10, 4, 10, 10)
+        lay.setContentsMargins(PAGE_MARGIN_X, 4, PAGE_MARGIN_X, 10)
         lay.setSpacing(6)
         lay.addWidget(h1("Turnieje"))
         lay.addWidget(muted("Wybierz turniej z listy lub utwórz nowy."))
@@ -194,11 +196,12 @@ class AppWindow(QMainWindow):
         root.setObjectName("root")
         self.setCentralWidget(root)
         outer = QVBoxLayout(root)
-        outer.setContentsMargins(16, 12, 16, 12)
+        outer.setContentsMargins(0, 12, 0, 12)
         outer.setSpacing(8)
 
-        # stały górny pasek
+        # stały górny pasek — wcięty jak treść stron, żeby przyciski były w jednej linii
         bar = QHBoxLayout()
+        bar.setContentsMargins(PAGE_MARGIN_X, 0, PAGE_MARGIN_X, 0)
         self.back_btn = button("←  Lista turniejów")
         self.back_btn.clicked.connect(self._back)
         self.back_btn.setVisible(False)

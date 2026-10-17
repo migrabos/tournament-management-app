@@ -7,6 +7,10 @@ from PySide6.QtCore import Qt
 
 from app.ui.theme import STATE_LABELS, badge_colors
 
+# Poziomy margines treści stron — ten sam ma górny pasek (wstecz / motyw),
+# dzięki czemu jego przyciski są w jednej linii z przyciskami stron.
+PAGE_MARGIN_X = 16
+
 
 class Stepper(QFrame):
     """Kompaktowy licznik [ − n + ] — zamiennik QSpinBox z czystym wyglądem."""

@@ -15,6 +15,7 @@ from app.ui.theme import STAGE_LABELS, BRACKETS
 from app.ui import graphics
 from app.ui.widgets import (
     primary_button, button, h1, h2, muted, status_badge, table, center_headers, empty_state,
+    PAGE_MARGIN_X,
 )
 from app.ui.dialogs import (
     ResultDialog, TransferDialog, MatchDetailsDialog, MatchDateDialog, format_kickoff,
@@ -33,7 +34,7 @@ class TournamentPage(QWidget):
         t = tournament_dao.get_tournament(tournament_id)
 
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(22, 8, 22, 18)
+        outer.setContentsMargins(PAGE_MARGIN_X, 8, PAGE_MARGIN_X, 18)
         outer.setSpacing(14)
 
         # Nagłówek
