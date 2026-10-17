@@ -2,18 +2,22 @@
 
   - render_round(tid, n)   — kolejka fazy grupowej: mecze obu grup z godzinami
                              i wynikami oraz tabele grup po tej kolejce;
-  - render_knockout(tid)   — faza pucharowa: trzy drabinki (miejsca 1-4, 5-8, 9-12).
+  - render_knockout(tid)   — faza pucharowa: trzy drabinki (miejsca 1-4, 5-8, 9-12);
+  - render_scorers(tid)    — klasyfikacja strzelców (wszyscy z co najmniej jednym golem);
+  - render_group_round(tid, n, g) — kolejka jednej grupy: mecze z wynikami i strzelcami.
 
 Styl jest stały (niezależny od motywu aplikacji), żeby kolejne grafiki
 wyglądały spójnie. Rysowane w 2x dla ostrości.
 """
+from datetime import datetime
+
 from PySide6.QtCore import Qt, QRectF, QPointF
 from PySide6.QtGui import (
     QImage, QPainter, QColor, QFont, QFontMetrics, QLinearGradient, QPen, QPainterPath,
 )
 
 from app.dao import tournament_dao
-from app.services import schedule
+from app.services import schedule, match_result
 from app.reports import reports
 
 SCALE = 2
@@ -258,6 +262,155 @@ def _standings(p: QPainter, r: QRectF, rows: list[dict]) -> None:
         cells(y, [row["points"], row["played"], row["wins"], row["draws"], row["losses"],
                   row["goals_for"], row["goals_against"], f"+{gd}" if gd > 0 else gd])
         y += TABLE_ROW_H
+
+
+# ---------------------------------------------------------------- strzelcy
+
+SCORER_ROW_H = 44
+SCORERS_PER_COLUMN = 15      # dłuższa lista dzieli się na dwie kolumny
+
+
+def render_scorers(tournament_id: int) -> QImage:
+    tournament = tournament_dao.get_tournament(tournament_id)["name"]
+    rows = reports.top_scorers(tournament_id)
+    if not rows:
+        raise ValueError("Nikt jeszcze nie strzelił gola.")
+
+    two_cols = len(rows) > SCORERS_PER_COLUMN
+    per_col = (len(rows) + 1) // 2 if two_cols else len(rows)
+    columns = [rows[:per_col], rows[per_col:]] if two_cols else [rows]
+    col_w = (WIDTH - 2 * MARGIN - GAP) / 2 if two_cols else 820
+    card_h = 46 + SCORER_ROW_H + per_col * SCORER_ROW_H + 8
+    head_h = 160
+    height = head_h + 34 + card_h + 40
+
+    img, p = _new_image(height)
+    _header(p, tournament, "KLASYFIKACJA STRZELCÓW",
+            f"stan na {datetime.now():%d.%m.%Y}")
+    x0 = MARGIN if two_cols else (WIDTH - col_w) / 2
+    for i, col in enumerate(columns):
+        x = x0 + i * (col_w + GAP)
+        body = _card(p, QRectF(x, head_h + 34, col_w, card_h),
+                     "STRZELCY" if not two_cols else ("STRZELCY" if i == 0 else "STRZELCY — CD."))
+        _scorers_list(p, QRectF(x, body.y(), col_w, body.height()), col)
+    p.end()
+    return img
+
+
+def _scorers_list(p: QPainter, r: QRectF, rows: list[dict]) -> None:
+    pad, num_w, goals_w = 16, 48, 64
+    team_w = (r.width() - 2 * pad - num_w - goals_w) * 0.45
+    name_w = r.width() - 2 * pad - num_w - goals_w - team_w
+    name_x = r.x() + pad + num_w
+    team_x = name_x + name_w
+
+    y = r.y()
+    _rect(p, QRectF(r.x() + 1, y, r.width() - 2, SCORER_ROW_H), "soft")
+    for text, x, w, align in (("ZAWODNIK", name_x, name_w, Qt.AlignLeft),
+                              ("DRUŻYNA", team_x, team_w, Qt.AlignLeft),
+                              ("GOLE", r.right() - pad - goals_w, goals_w, Qt.AlignCenter)):
+        _text(p, QRectF(x, y, w, SCORER_ROW_H), text, 13, weight=QFont.Bold, color="muted",
+              align=align | Qt.AlignVCenter, spacing=1)
+    y += SCORER_ROW_H
+
+    prev_rank = None
+    for i, row in enumerate(rows):
+        if i % 2:
+            _rect(p, QRectF(r.x() + 1, y, r.width() - 2, SCORER_ROW_H), "zebra")
+        podium = row["rank"] <= 3
+        rank = f"{row['rank']}." if row["rank"] != prev_rank else ""   # ex aequo: miejsce raz
+        prev_rank = row["rank"]
+        _text(p, QRectF(r.x() + pad, y, num_w, SCORER_ROW_H), rank, 16,
+              weight=QFont.Bold, color="accent")
+        _text(p, QRectF(name_x, y, name_w - 10, SCORER_ROW_H), row["player_name"], 16,
+              weight=QFont.Bold if podium else QFont.DemiBold)
+        _text(p, QRectF(team_x, y, team_w - 10, SCORER_ROW_H), _name(row["team_name"]), 14,
+              weight=QFont.DemiBold, color="muted")
+        pill = QRectF(r.right() - pad - goals_w + 10, y + 7, goals_w - 20, SCORER_ROW_H - 14)
+        _rect(p, pill, "accent" if podium else "soft", 8)
+        _text(p, pill, str(row["goals"]), 17, weight=QFont.Bold,
+              color="#ffffff" if podium else "text", align=Qt.AlignCenter)
+        y += SCORER_ROW_H
+
+
+# ---------------------------------------------------------------- kolejka jednej grupy
+
+SCORER_LINE_H = 34
+
+
+def render_group_round(tournament_id: int, round_no: int, group_name: str) -> QImage:
+    tournament = tournament_dao.get_tournament(tournament_id)["name"]
+    matches = sorted((m for m in schedule.get_schedule(tournament_id, group_name)
+                      if m["round"] == round_no),
+                     key=lambda m: (m["scheduled_at"] or "9", m["match_id"]))
+    if not matches:
+        raise ValueError(f"Brak meczów grupy {group_name} w kolejce {round_no}.")
+    details = [match_result.get_match_details(m["match_id"]) for m in matches]
+
+    def card_h(d):
+        n = max(len(d["home_scorers"]), len(d["away_scorers"])) if d["played"] else 0
+        return 36 + 110 + (n * SCORER_LINE_H + 24 if n else 0)
+
+    head_h = 160
+    height = head_h + 34 + sum(card_h(d) + 22 for d in details) - 22 + 40
+    img, p = _new_image(height)
+    _header(p, tournament, f"{round_no}. KOLEJKA · GRUPA {group_name}", _dates_label(matches))
+
+    y = head_h + 34
+    for d in details:
+        h = card_h(d)
+        _match_card(p, QRectF(MARGIN, y, WIDTH - 2 * MARGIN, h), d)
+        y += h + 22
+    p.end()
+    return img
+
+
+def _match_card(p: QPainter, r: QRectF, d: dict) -> None:
+    _rect(p, r, "card", 14, "border")
+    t = _time(d["scheduled_at"])
+    _text(p, QRectF(r.x(), r.y() + 14, r.width(), 22), f"godz. {t}" if t else "", 15,
+          weight=QFont.Bold, color="accent", align=Qt.AlignCenter, spacing=1)
+
+    row = QRectF(r.x(), r.y() + 36, r.width(), 110)
+    third = r.width() / 3
+    winner = None
+    if d["played"] and d["home_score"] != d["away_score"]:
+        winner = "home" if d["home_score"] > d["away_score"] else "away"
+    for side, x in (("home", r.x()), ("away", r.x() + 2 * third)):
+        f = _font(26, QFont.Black if winner == side else QFont.Bold, 1)
+        p.setFont(f)
+        p.setPen(QColor(C["text"]))
+        p.drawText(QRectF(x + 24, row.y(), third - 48, row.height()),
+                   Qt.AlignCenter | Qt.TextWordWrap, _name(d[f"{side}_team_name"]))
+    _text(p, QRectF(r.x() + third, row.y(), third, row.height()),
+          f"{d['home_score']} : {d['away_score']}" if d["played"] else "–  :  –", 64,
+          weight=QFont.Black, color="accent" if d["played"] else "muted", align=Qt.AlignCenter)
+
+    if not d["played"] or not (d["home_scorers"] or d["away_scorers"]):
+        return
+    half = r.width() / 2
+    top = row.bottom() + 4
+    n = max(len(d["home_scorers"]), len(d["away_scorers"]))
+    p.setPen(QPen(QColor(C["border"]), 1))
+    p.drawLine(QPointF(r.x() + 24, top - 4), QPointF(r.right() - 24, top - 4))
+    p.drawLine(QPointF(r.x() + half, top + 6), QPointF(r.x() + half, top + n * SCORER_LINE_H + 6))
+    for side, align in (("home_scorers", Qt.AlignRight), ("away_scorers", Qt.AlignLeft)):
+        ly = top + 8
+        x = r.x() + 30 if align == Qt.AlignRight else r.x() + half + 30
+        w = half - 60
+        for s in d[side]:
+            text = s["name"] + (f"  ×{s['goals']}" if s["goals"] > 1 else "")
+            _ball(p, QPointF(x + w - 6 if align == Qt.AlignRight else x + 6, ly + SCORER_LINE_H / 2))
+            tr = QRectF(x, ly, w - 22, SCORER_LINE_H) if align == Qt.AlignRight \
+                else QRectF(x + 22, ly, w - 22, SCORER_LINE_H)
+            _text(p, tr, text, 16, weight=QFont.DemiBold, align=align | Qt.AlignVCenter)
+            ly += SCORER_LINE_H
+
+
+def _ball(p: QPainter, c: QPointF) -> None:
+    p.setPen(Qt.NoPen)
+    p.setBrush(QColor(C["accent"]))
+    p.drawEllipse(c, 6, 6)
 
 
 # ---------------------------------------------------------------- faza pucharowa

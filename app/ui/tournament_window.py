@@ -364,10 +364,14 @@ class TournamentPage(QWidget):
         top.addStretch()
         self.group_progress = muted("")
         top.addWidget(self.group_progress)
-        btn_round_img = button("🖼  Grafika kolejki")
+        btn_round_img = button("Grafika kolejki")
         btn_round_img.setToolTip("Eksport PNG z wynikami kolejki i tabelami grup (np. na Facebooka).")
         btn_round_img.clicked.connect(self._export_round_graphic)
         top.addWidget(btn_round_img)
+        btn_group_img = button("Grafika kolejki grupy")
+        btn_group_img.setToolTip("Eksport PNG: mecze jednej grupy w kolejce z wynikami i strzelcami.")
+        btn_group_img.clicked.connect(self._export_group_round_graphic)
+        top.addWidget(btn_group_img)
         self.btn_confirm_groups = primary_button("Zatwierdź fazę grupową")
         self.btn_confirm_groups.setToolTip(
             "Tworzy drabinki KO. Po zatwierdzeniu wyniki grup są zablokowane.")
@@ -491,7 +495,7 @@ class TournamentPage(QWidget):
         ko_top.addWidget(muted("Dwuklik meczu z obiema drużynami: wpisanie wyniku lub szczegóły z listą strzelców. "
                                "Prawy przycisk: ustawienie terminu."))
         ko_top.addStretch()
-        btn_ko_img = button("🖼  Grafika fazy pucharowej")
+        btn_ko_img = button("Grafika fazy pucharowej")
         btn_ko_img.setToolTip("Eksport PNG z drabinkami, godzinami i wynikami (np. na Facebooka).")
         btn_ko_img.clicked.connect(self._export_knockout_graphic)
         ko_top.addWidget(btn_ko_img)
@@ -570,19 +574,27 @@ class TournamentPage(QWidget):
         page = QWidget()
         lay = QVBoxLayout(page)
         lay.setContentsMargins(14, 14, 14, 14)
+        sc_top = QHBoxLayout()
+        sc_top.addWidget(muted("Wszyscy zawodnicy, którzy strzelili gola (bez rzutów karnych w serii)."))
+        sc_top.addStretch()
+        btn_sc_img = button("Grafika strzelców")
+        btn_sc_img.setToolTip("Eksport PNG z klasyfikacją strzelców (np. na Facebooka).")
+        btn_sc_img.clicked.connect(self._export_scorers_graphic)
+        sc_top.addWidget(btn_sc_img)
+        lay.addLayout(sc_top)
         self.scorers = table(["#", "Zawodnik", "Drużyna", "Gole"], stretch_col=1)
         # Zawodnik i Drużyna dzielą szerokość po równo (bez wielkiej przerwy w środku)
         self.scorers.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
         center_headers(self.scorers, [0, 3])
         lay.addWidget(self.scorers)
-        self.tabs.addTab(page, "Królowie strzelców")
+        self.tabs.addTab(page, "Klasyfikacja strzelców")
 
     def _refresh_scorers(self):
         self.scorers.setRowCount(0)
-        for i, row in enumerate(reports.top_scorers(self.tournament_id), start=1):
+        for row in reports.top_scorers(self.tournament_id):
             r = self.scorers.rowCount()
             self.scorers.insertRow(r)
-            self.scorers.setItem(r, 0, self._item(i, center=True))
+            self.scorers.setItem(r, 0, self._item(row["rank"], center=True))
             self.scorers.setItem(r, 1, self._item(row["player_name"]))
             self.scorers.setItem(r, 2, self._item(row["team_name"]))
             self.scorers.setItem(r, 3, self._item(row["goals"], center=True))
@@ -624,27 +636,42 @@ class TournamentPage(QWidget):
             self.refresh_all()
 
     # ---------- grafiki do publikacji ----------
+    def _pick_round(self, title: str, groups: bool = False):
+        """Wybór kolejki (opcjonalnie z grupą). Domyślnie ostatnia kolejka z rozegranym meczem.
+        Zwraca n, (n, grupa) albo None."""
+        fixtures = [f for f in schedule.get_schedule(self.tournament_id) if f["stage"] == "GROUP"]
+        if not fixtures:
+            QMessageBox.information(self, title, "Najpierw wygeneruj terminarz fazy grupowej.")
+            return None
+        options = sorted({(f["round"], f["group_name"]) if groups else f["round"] for f in fixtures})
+        played = [((f["round"], f["group_name"]) if groups else f["round"])
+                  for f in fixtures if f["played"]]
+        default = options.index(max(played)) if played else 0
+        labels = [f"{o[0]}. kolejka · grupa {o[1]}" if groups else f"{o}. kolejka" for o in options]
+        choice, ok = QInputDialog.getItem(self, title, "Kolejka:", labels, default, False)
+        return options[labels.index(choice)] if ok else None
+
     def _export_round_graphic(self):
-        rounds = graphics.round_numbers(self.tournament_id)
-        if not rounds:
-            QMessageBox.information(self, "Grafika kolejki",
-                                    "Najpierw wygeneruj terminarz fazy grupowej.")
-            return
-        # domyślnie ostatnia kolejka z rozegranym meczem
-        played = [f["round"] for f in schedule.get_schedule(self.tournament_id)
-                  if f["stage"] == "GROUP" and f["played"]]
-        default = rounds.index(max(played)) if played else 0
-        labels = [f"{n}. kolejka" for n in rounds]
-        choice, ok = QInputDialog.getItem(self, "Grafika kolejki", "Kolejka:", labels, default, False)
-        if not ok:
-            return
-        n = rounds[labels.index(choice)]
-        self._save_graphic(lambda: graphics.render_round(self.tournament_id, n),
-                           f"{self._safe_name()} - kolejka {n}.png")
+        n = self._pick_round("Grafika kolejki")
+        if n is not None:
+            self._save_graphic(lambda: graphics.render_round(self.tournament_id, n),
+                               f"{self._safe_name()} - kolejka {n}.png")
 
     def _export_knockout_graphic(self):
         self._save_graphic(lambda: graphics.render_knockout(self.tournament_id),
                            f"{self._safe_name()} - faza pucharowa.png")
+
+    def _export_scorers_graphic(self):
+        self._save_graphic(lambda: graphics.render_scorers(self.tournament_id),
+                           f"{self._safe_name()} - strzelcy.png")
+
+    def _export_group_round_graphic(self):
+        picked = self._pick_round("Grafika kolejki grupy", groups=True)
+        if picked is None:
+            return
+        n, g = picked
+        self._save_graphic(lambda: graphics.render_group_round(self.tournament_id, n, g),
+                           f"{self._safe_name()} - kolejka {n} grupa {g}.png")
 
     def _save_graphic(self, render, filename: str):
         try:
