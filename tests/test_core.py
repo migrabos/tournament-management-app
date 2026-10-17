@@ -578,3 +578,46 @@ class TestPenaltyShootout(DBTestCase):
         del data["penalty_kicks"]
         backup.import_tournament(data)
 
+
+class TestMatchDateTime(DBTestCase):
+    def _fixture(self):
+        tid, _ = self._make_tournament()
+        draw.draw_groups(tid)
+        schedule.generate_group_schedule(tid)
+        return tid, next(f for f in schedule.get_schedule(tid) if f["stage"] == "GROUP")
+
+    def test_schedule_generation_leaves_date_empty(self):
+        tid, _ = self._fixture()
+        self.assertTrue(all(f["scheduled_at"] is None for f in schedule.get_schedule(tid)))
+
+    def test_set_change_and_clear(self):
+        tid, fx = self._fixture()
+        schedule.set_match_datetime(fx["match_id"], "2026-10-18 18:30")
+        self.assertEqual(match_result.get_match(fx["match_id"])["scheduled_at"], "2026-10-18 18:30")
+        schedule.set_match_datetime(fx["match_id"], "2026-10-19 9:05")      # normalizacja
+        self.assertEqual(match_result.get_match(fx["match_id"])["scheduled_at"], "2026-10-19 09:05")
+        schedule.set_match_datetime(fx["match_id"], None)
+        self.assertIsNone(match_result.get_match(fx["match_id"])["scheduled_at"])
+
+    def test_invalid_rejected(self):
+        tid, fx = self._fixture()
+        for bad in ("jutro", "2026-13-01 10:00", "2026-10-18"):
+            with self.assertRaises(ValueError):
+                schedule.set_match_datetime(fx["match_id"], bad)
+        with self.assertRaises(ValueError):
+            schedule.set_match_datetime(999999, "2026-10-18 18:30")
+
+    def test_date_survives_result_and_export_import(self):
+        from app.services import backup
+        tid, fx = self._fixture()
+        schedule.set_match_datetime(fx["match_id"], "2026-10-18 18:30")
+        match_result.save_match_result(fx["match_id"], 1, 0, [self._first_player(fx["home_team_id"])])
+        self.assertEqual(match_result.get_match(fx["match_id"])["scheduled_at"], "2026-10-18 18:30")
+
+        data = backup.export_tournament(tid)
+        new_tid = backup.import_tournament(data)
+        dates = [f["scheduled_at"] for f in schedule.get_schedule(new_tid) if f["scheduled_at"]]
+        self.assertEqual(dates, ["2026-10-18 18:30"])
+        for m in data["matches"]:          # plik sprzed wprowadzenia terminów
+            del m["scheduled_at"]
+        backup.import_tournament(data)

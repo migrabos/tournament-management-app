@@ -3,7 +3,7 @@
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTabWidget, QLabel,
     QTableWidgetItem, QTreeWidget, QTreeWidgetItem, QHeaderView,
-    QInputDialog, QMessageBox, QSplitter, QFileDialog,
+    QInputDialog, QMessageBox, QSplitter, QFileDialog, QMenu,
 )
 from PySide6.QtCore import Qt
 
@@ -14,7 +14,9 @@ from app.ui.theme import STAGE_LABELS, BRACKETS
 from app.ui.widgets import (
     primary_button, button, h1, h2, muted, status_badge, table, center_headers, empty_state,
 )
-from app.ui.dialogs import ResultDialog, TransferDialog, MatchDetailsDialog
+from app.ui.dialogs import (
+    ResultDialog, TransferDialog, MatchDetailsDialog, MatchDateDialog, format_kickoff,
+)
 
 UID = Qt.UserRole
 
@@ -353,7 +355,7 @@ class TournamentPage(QWidget):
         cl.setContentsMargins(0, 0, 0, 0)
         cl.setSpacing(8)
         top = QHBoxLayout()
-        top.addWidget(muted("Dwuklik meczu: wpisanie wyniku lub szczegóły z listą strzelców."))
+        top.addWidget(muted("Dwuklik meczu: wpisanie wyniku lub szczegóły z listą strzelców. Prawy przycisk: ustawienie terminu."))
         top.addStretch()
         self.group_progress = muted("")
         top.addWidget(self.group_progress)
@@ -383,13 +385,17 @@ class TournamentPage(QWidget):
             box.addWidget(tv)
 
             box.addWidget(muted("Terminarz"))
-            fx = table(["Kolejka", "Gospodarze", "Wynik", "Goście"], stretch_col=1)
+            fx = table(["Kolejka", "Gospodarze", "Wynik", "Goście", "Termin"], stretch_col=1)
             fx.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
-            center_headers(fx, [0, 2])
+            center_headers(fx, [0, 2, 4])
             fx.horizontalHeaderItem(1).setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
             fx.horizontalHeaderItem(3).setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)
             fx.cellDoubleClicked.connect(
                 lambda r, _c, t=fx: self._open_match(t.item(r, 0).data(UID)))
+            fx.setContextMenuPolicy(Qt.CustomContextMenu)
+            fx.customContextMenuRequested.connect(
+                lambda pos, t=fx: self._match_menu(
+                    t, pos, t.item(t.rowAt(pos.y()), 0).data(UID) if t.rowAt(pos.y()) >= 0 else None))
             self.group_fixtures[gname] = fx
             box.addWidget(fx)
 
@@ -446,6 +452,7 @@ class TournamentPage(QWidget):
             tbl.setItem(r, 1, self._item(fx["home_team_name"], align=Qt.AlignRight | Qt.AlignVCenter))
             tbl.setItem(r, 2, self._item(score, center=True))
             tbl.setItem(r, 3, self._item(fx["away_team_name"], align=Qt.AlignLeft | Qt.AlignVCenter))
+            tbl.setItem(r, 4, self._item(format_kickoff(fx["scheduled_at"]), center=True))
 
     def _confirm_groups(self):
         answer = QMessageBox.question(
@@ -471,10 +478,11 @@ class TournamentPage(QWidget):
         lay = QVBoxLayout(page)
         lay.setContentsMargins(14, 14, 14, 14)
         lay.setSpacing(10)
-        lay.addWidget(muted("Dwuklik meczu z obiema drużynami: wpisanie wyniku lub szczegóły z listą strzelców."))
+        lay.addWidget(muted("Dwuklik meczu z obiema drużynami: wpisanie wyniku lub szczegóły z listą strzelców. "
+                            "Prawy przycisk: ustawienie terminu."))
         self.ko_tree = QTreeWidget()
-        self.ko_tree.setColumnCount(4)
-        self.ko_tree.setHeaderLabels(["Faza", "Gospodarze", "Wynik", "Goście"])
+        self.ko_tree.setColumnCount(5)
+        self.ko_tree.setHeaderLabels(["Faza", "Gospodarze", "Wynik", "Goście", "Termin"])
         self.ko_tree.setRootIsDecorated(True)
         self.ko_tree.setAlternatingRowColors(False)
         self.ko_tree.setFocusPolicy(Qt.NoFocus)
@@ -483,11 +491,18 @@ class TournamentPage(QWidget):
         self.ko_tree.header().setSectionResizeMode(1, QHeaderView.Stretch)
         self.ko_tree.header().setSectionResizeMode(2, QHeaderView.ResizeToContents)
         self.ko_tree.header().setSectionResizeMode(3, QHeaderView.Stretch)
+        self.ko_tree.header().setSectionResizeMode(4, QHeaderView.ResizeToContents)
         hi = self.ko_tree.headerItem()
         hi.setTextAlignment(1, Qt.AlignRight | Qt.AlignVCenter)
         hi.setTextAlignment(2, Qt.AlignCenter)
         hi.setTextAlignment(3, Qt.AlignLeft | Qt.AlignVCenter)
+        hi.setTextAlignment(4, Qt.AlignCenter)
         self.ko_tree.itemDoubleClicked.connect(self._ko_double)
+        self.ko_tree.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.ko_tree.customContextMenuRequested.connect(
+            lambda pos: self._match_menu(
+                self.ko_tree, pos,
+                it.data(0, UID) if (it := self.ko_tree.itemAt(pos)) else None))
         lay.addWidget(self.ko_tree)
         self.tabs.addTab(page, "Drabinki KO")
 
@@ -525,10 +540,12 @@ class TournamentPage(QWidget):
                                 away += "  ✓"
                     else:
                         score = "–  :  –"
-                    child = QTreeWidgetItem([STAGE_LABELS.get(stage, stage), home, score, away])
+                    child = QTreeWidgetItem([STAGE_LABELS.get(stage, stage), home, score, away,
+                                             format_kickoff(fx["scheduled_at"])])
                     child.setTextAlignment(1, Qt.AlignRight | Qt.AlignVCenter)
                     child.setTextAlignment(2, Qt.AlignCenter)
                     child.setTextAlignment(3, Qt.AlignLeft | Qt.AlignVCenter)
+                    child.setTextAlignment(4, Qt.AlignCenter)
                     child.setData(0, UID, fx["match_id"])
                     top.addChild(child)
 
@@ -591,6 +608,24 @@ class TournamentPage(QWidget):
             self.refresh_all()
 
     # ---------- wspólne: wynik ----------
+    def _match_subtitle(self, m) -> str:
+        if m["stage"] == "GROUP":
+            return f"Grupa {m['group_name']} · kolejka {m['round']}"
+        return STAGE_LABELS.get(m["stage"], m["stage"])
+
+    def _match_menu(self, widget, pos, match_id):
+        """Menu kontekstowe meczu (prawy przycisk): ustawienie terminu."""
+        if match_id is None:
+            return
+        menu = QMenu(self)
+        menu.addAction("Ustaw termin meczu…", lambda: self._set_match_date(match_id))
+        menu.exec(widget.viewport().mapToGlobal(pos))
+
+    def _set_match_date(self, match_id):
+        m = match_result.get_match(match_id)
+        if m and MatchDateDialog(self, match_id, self._match_subtitle(m)).exec():
+            self.refresh_all()
+
     def _open_match(self, match_id):
         """Dwuklik meczu: rozegrany → szczegóły, nierozegrany → wpisanie wyniku."""
         if match_id is None:
@@ -601,11 +636,7 @@ class TournamentPage(QWidget):
         if not m["played"]:
             self._enter_result(match_id)
             return
-        if m["stage"] == "GROUP":
-            subtitle = f"Grupa {m['group_name']} · kolejka {m['round']}"
-        else:
-            subtitle = STAGE_LABELS.get(m["stage"], m["stage"])
-        dlg = MatchDetailsDialog(self, match_id, subtitle)
+        dlg = MatchDetailsDialog(self, match_id, self._match_subtitle(m))
         dlg.exec()
         if dlg.want_edit:
             self._enter_result(match_id, ask=False)

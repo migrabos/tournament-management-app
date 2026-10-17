@@ -46,6 +46,7 @@ CREATE TABLE match (
     winner_pen     INTEGER CHECK (winner_pen IN (NULL, 0, 1)),
                             -- 0 = home wygrał karne, 1 = away wygrał karne
     played         INTEGER NOT NULL DEFAULT 0 CHECK (played IN (0,1)),
+    scheduled_at   TEXT,     -- termin 'YYYY-MM-DD HH:MM' ustawiany ręcznie (NULL = nieustalony)
 
     CHECK (home_team_id IS NULL OR away_team_id IS NULL OR home_team_id != away_team_id),
     CHECK ( (stage = 'GROUP' AND group_name IS NOT NULL)
@@ -276,6 +277,7 @@ SELECT m.id            AS match_id,
        m.home_score,
        m.away_score,
        m.winner_pen,
+       m.scheduled_at,
        ss.home_pens,
        ss.away_pens,
        m.played

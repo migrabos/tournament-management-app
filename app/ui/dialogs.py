@@ -1,12 +1,13 @@
-"""Dialogi: wpisywanie/edycja wyniku meczu oraz transfer zawodnika."""
+"""Dialogi: wpisywanie/edycja wyniku meczu, termin meczu oraz transfer zawodnika."""
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel,
     QRadioButton, QButtonGroup, QMessageBox, QComboBox, QCheckBox, QWidget,
+    QCalendarWidget, QTimeEdit,
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QDateTime
 
 from app.dao import team_dao, player_dao
-from app.services import match_result, transfer
+from app.services import match_result, transfer, schedule
 from app.ui.widgets import primary_button, button, h2, muted, card, Stepper
 
 
@@ -301,6 +302,80 @@ class ShootoutDialog(QDialog):
         self.accept()
 
 
+QT_DATETIME_FORMAT = "yyyy-MM-dd HH:mm"      # odpowiednik schedule.DATETIME_FORMAT
+
+
+class MatchDateDialog(QDialog):
+    """Ustawienie lub usunięcie terminu (data i godzina) meczu."""
+
+    def __init__(self, parent, match_id: int, subtitle: str = ""):
+        super().__init__(parent)
+        self.match_id = match_id
+        self.setWindowTitle("Termin meczu")
+        self.setMinimumWidth(380)
+        m = match_result.get_match_details(match_id)
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(22, 20, 22, 20)
+        root.setSpacing(14)
+        title = h2(f"{m['home_team_name'] or '?'}  –  {m['away_team_name'] or '?'}")
+        title.setAlignment(Qt.AlignCenter)
+        root.addWidget(title)
+        if subtitle:
+            root.addWidget(muted(subtitle), alignment=Qt.AlignCenter)
+
+        current = (QDateTime.fromString(m["scheduled_at"], QT_DATETIME_FORMAT)
+                   if m["scheduled_at"] else QDateTime.currentDateTime())
+        if not m["scheduled_at"]:      # domyślnie najbliższa pełna godzina
+            t = current.time()
+            current = current.addSecs(3600 - t.minute() * 60 - t.second())
+
+        self.calendar = QCalendarWidget()
+        self.calendar.setGridVisible(False)
+        self.calendar.setVerticalHeaderFormat(QCalendarWidget.NoVerticalHeader)
+        self.calendar.setSelectedDate(current.date())
+        root.addWidget(self.calendar)
+
+        time_row = QHBoxLayout()
+        time_row.addWidget(QLabel("Godzina:"))
+        self.time = QTimeEdit(current.time())
+        self.time.setDisplayFormat("HH:mm")
+        self.time.setButtonSymbols(QTimeEdit.NoButtons)   # wpisywanie / strzałki / kółko myszy
+        time_row.addWidget(self.time)
+        time_row.addStretch()
+        root.addLayout(time_row)
+
+        btns = QHBoxLayout()
+        if m["scheduled_at"]:
+            clear = button("Usuń termin", danger=True)
+            clear.clicked.connect(lambda: self._save(None))
+            btns.addWidget(clear)
+        btns.addStretch()
+        cancel = button("Anuluj")
+        cancel.clicked.connect(self.reject)
+        ok = primary_button("Zapisz")
+        ok.clicked.connect(lambda: self._save(
+            QDateTime(self.calendar.selectedDate(), self.time.time()).toString(QT_DATETIME_FORMAT)))
+        btns.addWidget(cancel)
+        btns.addWidget(ok)
+        root.addLayout(btns)
+
+    def _save(self, when):
+        try:
+            schedule.set_match_datetime(self.match_id, when)
+        except Exception as e:
+            QMessageBox.critical(self, "Błąd", str(e))
+            return
+        self.accept()
+
+
+def format_kickoff(when: str | None) -> str:
+    """'2026-10-18 18:30' → '18.10.2026  18:30'; brak terminu → '—'."""
+    if not when:
+        return "—"
+    return QDateTime.fromString(when, QT_DATETIME_FORMAT).toString("dd.MM.yyyy  HH:mm")
+
+
 class TransferDialog(QDialog):
     """Transfer zawodnika do innej drużyny w tym samym turnieju."""
 
@@ -385,6 +460,8 @@ class MatchDetailsDialog(QDialog):
         root.setContentsMargins(24, 20, 24, 20)
         root.setSpacing(14)
 
+        if d["scheduled_at"]:
+            subtitle = " · ".join(filter(None, [subtitle, format_kickoff(d["scheduled_at"])]))
         if subtitle:
             root.addWidget(muted(subtitle), alignment=Qt.AlignCenter)
 

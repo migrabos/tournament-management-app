@@ -60,7 +60,7 @@ def export_tournament(tournament_id: int) -> dict:
                    WHERE t.tournament_id = ? ORDER BY p.id"""),
             "matches": rows(
                 """SELECT id, stage, group_name, round, home_team_id, away_team_id,
-                          home_score, away_score, winner_pen, played
+                          home_score, away_score, winner_pen, played, scheduled_at
                    FROM match WHERE tournament_id = ? ORDER BY id"""),
             "goals": rows(
                 """SELECT g.match_id, g.scorer_id FROM goal g
@@ -198,11 +198,12 @@ def _do_import(data: dict) -> int:
             match_map[m["id"]] = conn.execute(
                 """INSERT INTO match (tournament_id, stage, group_name, round,
                        home_team_id, away_team_id, home_score, away_score,
-                       winner_pen, played)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                       winner_pen, played, scheduled_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (tid, m["stage"], m["group_name"], m["round"],
                  team_map.get(m["home_team_id"]), team_map.get(m["away_team_id"]),
-                 m["home_score"], m["away_score"], m["winner_pen"], m["played"])
+                 m["home_score"], m["away_score"], m["winner_pen"], m["played"],
+                 m.get("scheduled_at"))   # brak w plikach sprzed wprowadzenia terminów
             ).lastrowid
 
         # Trigger trg_goal_scorer_valid sprawdza, czy strzelec gra TERAZ w jednej
