@@ -621,3 +621,23 @@ class TestMatchDateTime(DBTestCase):
         for m in data["matches"]:          # plik sprzed wprowadzenia terminów
             del m["scheduled_at"]
         backup.import_tournament(data)
+
+
+class TestGroupTableAfterRound(DBTestCase):
+    def test_table_counts_only_rounds_up_to_given(self):
+        tid, _ = self._make_tournament()
+        draw.draw_groups(tid)
+        schedule.generate_group_schedule(tid)
+        self._play_all_group_matches(tid)      # każdy mecz 1:0 dla gospodarzy
+        for g in ("A", "B"):
+            # po ostatniej kolejce = tabela końcowa
+            last = max(f["round"] for f in schedule.get_schedule(tid, g))
+            self.assertEqual(reports.group_table_after_round(tid, g, last),
+                             reports.group_table(tid, g))
+            after_1 = reports.group_table_after_round(tid, g, 1)
+            self.assertEqual(len(after_1), 6)
+            self.assertTrue(all(r["played"] == 1 for r in after_1))
+            self.assertEqual(sum(r["points"] for r in after_1), 3 * 3)
+            # przed pierwszą kolejką — same zera
+            self.assertTrue(all(r["played"] == 0 and r["points"] == 0
+                                for r in reports.group_table_after_round(tid, g, 0)))
