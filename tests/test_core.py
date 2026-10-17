@@ -319,3 +319,103 @@ class TestConfirmGroupStage(DBTestCase):
         match_result.confirm_group_stage(tid)
         with self.assertRaises(ValueError):
             match_result.confirm_group_stage(tid)
+
+
+class TestExportImport(DBTestCase):
+    def _snapshot(self, tid):
+        """Wszystko, co widzi użytkownik — do porównania przed i po imporcie."""
+        return {
+            "state": tournament_dao.get_state(tid),
+            "groups": {g: reports.group_table(tid, g) for g in ("A", "B")},
+            "scorers": reports.top_scorers(tid, limit=200),
+            "transfers": [(r["player_name"], r["from_team_name"], r["to_team_name"])
+                          for r in reports.transfer_history(tid)],
+            "matches": [(f["stage"], f["group_name"], f["round"], f["home_team_name"],
+                         f["away_team_name"], f["home_score"], f["away_score"],
+                         f["winner_pen"], f["played"])
+                        for f in schedule.get_schedule(tid)],
+        }
+
+    def test_round_trip_with_transfer_after_goal(self):
+        """Zawodnik strzela gola, potem przechodzi do innej drużyny.
+        Po eksporcie i imporcie turniej musi wyglądać identycznie."""
+        from app.services import backup
+        tid, teams = self._make_tournament(name="Liga")
+        draw.draw_groups(tid)
+        schedule.generate_group_schedule(tid)
+        fixtures = [f for f in schedule.get_schedule(tid) if f["stage"] == "GROUP"]
+
+        first = fixtures[0]
+        scorer = self._first_player(first["home_team_id"])
+        match_result.save_match_result(first["match_id"], 1, 0, [scorer])
+        other_team = next(t for t in teams
+                          if t not in (first["home_team_id"], first["away_team_id"]))
+        transfer.transfer_player(scorer, other_team)       # gol strzelony dla starej drużyny
+
+        for fx in fixtures[1:]:
+            match_result.save_match_result(
+                fx["match_id"], 1, 0, [self._first_player(fx["home_team_id"])])
+        match_result.confirm_group_stage(tid)
+        ko = next(f for f in schedule.get_schedule(tid) if f["stage"] == "SF_TOP")
+        match_result.save_match_result(ko["match_id"], 0, 0, [], winner_pen=1)  # karne
+
+        before = self._snapshot(tid)
+        path = pathlib.Path(self._tmpdir) / "liga.json"
+        backup.export_to_file(tid, path)
+        new_tid = backup.import_from_file(path)
+
+        self.assertNotEqual(new_tid, tid)
+        self.assertEqual(tournament_dao.get_tournament(new_tid)["name"], "Liga (import)")
+        self.assertEqual(self._snapshot(new_tid), before)
+
+        # trigger walidujący gole działa dalej po imporcie
+        with get_connection() as c:
+            n = c.execute("SELECT COUNT(*) AS n FROM sqlite_master "
+                          "WHERE type = 'trigger' AND name = 'trg_goal_scorer_valid'"
+                          ).fetchone()["n"]
+        self.assertEqual(n, 1)
+
+    def test_imported_tournament_can_be_continued(self):
+        from app.services import backup, demo
+        tid = demo.create_demo_tournament(seed=5)
+        new_tid = backup.import_tournament(backup.export_tournament(tid))
+        for fx in schedule.get_schedule(new_tid):
+            if fx["stage"] == "GROUP" and not fx["played"]:
+                match_result.save_match_result(fx["match_id"], 0, 0, [])
+        match_result.confirm_group_stage(new_tid)
+        self.assertEqual(tournament_dao.get_state(new_tid), "KO")
+
+    def test_repeated_import_gets_unique_names(self):
+        from app.services import backup
+        tid, _ = self._make_tournament(name="Cup", n_teams=2, players_per_team=1)
+        data = backup.export_tournament(tid)
+        names = {tournament_dao.get_tournament(backup.import_tournament(data))["name"]
+                 for _ in range(3)}
+        self.assertEqual(names, {"Cup (import)", "Cup (import 2)", "Cup (import 3)"})
+
+    def test_invalid_files_are_rejected_without_side_effects(self):
+        from app.services import backup
+        tid = self._make_tournament(name="Cup")[0]
+        draw.draw_groups(tid)
+        schedule.generate_group_schedule(tid)
+        self._play_all_group_matches(tid)
+        good = backup.export_tournament(tid)
+        count_before = len(tournament_dao.list_tournaments())
+
+        import copy
+        bad_cases = []
+        b = copy.deepcopy(good); b["format"] = "cos-innego"; bad_cases.append(b)
+        b = copy.deepcopy(good); b["version"] = 99; bad_cases.append(b)
+        b = copy.deepcopy(good); del b["teams"]; bad_cases.append(b)
+        b = copy.deepcopy(good); b["goals"].pop(); bad_cases.append(b)       # zły wynik
+        b = copy.deepcopy(good); b["players"][0]["team_id"] = 999999; bad_cases.append(b)
+        for bad in bad_cases:
+            with self.assertRaises(ValueError):
+                backup.import_tournament(bad)
+
+        broken = pathlib.Path(self._tmpdir) / "broken.json"
+        broken.write_text("{ to nie json", encoding="utf-8")
+        with self.assertRaises(ValueError):
+            backup.import_from_file(broken)
+
+        self.assertEqual(len(tournament_dao.list_tournaments()), count_before)
