@@ -46,6 +46,7 @@ CREATE TABLE match (
     winner_pen     INTEGER CHECK (winner_pen IN (NULL, 0, 1)),
                             -- 0 = home wygrał karne, 1 = away wygrał karne
     played         INTEGER NOT NULL DEFAULT 0 CHECK (played IN (0,1)),
+    scheduled_at   TEXT,     -- termin 'YYYY-MM-DD HH:MM' ustawiany ręcznie (NULL = nieustalony)
 
     CHECK (home_team_id IS NULL OR away_team_id IS NULL OR home_team_id != away_team_id),
     CHECK ( (stage = 'GROUP' AND group_name IS NOT NULL)
@@ -68,6 +69,19 @@ CREATE TABLE goal (
     FOREIGN KEY (scorer_id) REFERENCES player(id) ON DELETE CASCADE
 );
 
+-- Seria rzutów karnych (tylko KO, po remisie). Osobna tabela, więc karne
+-- nie trafiają do v_scorers ani statystyk bramek. scored = 0 to pudło/obrona.
+CREATE TABLE penalty_kick (
+    id         INTEGER PRIMARY KEY,
+    match_id   INTEGER NOT NULL,
+    kick_no    INTEGER NOT NULL CHECK (kick_no >= 1),  -- kolejność w serii
+    player_id  INTEGER NOT NULL,
+    scored     INTEGER NOT NULL CHECK (scored IN (0,1)),
+    UNIQUE (match_id, kick_no),
+    FOREIGN KEY (match_id)  REFERENCES match(id)  ON DELETE CASCADE,
+    FOREIGN KEY (player_id) REFERENCES player(id) ON DELETE CASCADE
+);
+
 CREATE TABLE transfer (
     id              INTEGER PRIMARY KEY,
     tournament_id   INTEGER  NOT NULL,
@@ -87,6 +101,7 @@ CREATE TABLE transfer (
 CREATE INDEX idx_match_tournament_stage ON match(tournament_id, stage);
 CREATE INDEX idx_goal_match              ON goal(match_id);
 CREATE INDEX idx_goal_scorer             ON goal(scorer_id);
+CREATE INDEX idx_penalty_match           ON penalty_kick(match_id);
 CREATE INDEX idx_player_team             ON player(team_id);
 CREATE INDEX idx_transfer_tournament_pl  ON transfer(tournament_id, player_id);
 
@@ -152,7 +167,22 @@ BEGIN
     SELECT RAISE(ABORT, 'Strzelec nie należy do żadnej z drużyn tego meczu.');
 END;
 
--- 6. Drużyny meczu muszą należeć do tego samego turnieju co mecz.
+-- 6. Rzut karny: tylko w meczu rozstrzygniętym karnymi (winner_pen ustawiony,
+--    co wg CHECK w match oznacza KO + remis), wykonawca z jednej z drużyn meczu.
+CREATE TRIGGER trg_penalty_kick_valid
+BEFORE INSERT ON penalty_kick
+FOR EACH ROW
+BEGIN
+    SELECT RAISE(ABORT, 'Rzuty karne tylko w meczu pucharowym rozstrzygniętym karnymi.')
+     WHERE (SELECT winner_pen FROM match WHERE id = NEW.match_id) IS NULL;
+    SELECT RAISE(ABORT, 'Wykonawca karnego nie należy do żadnej z drużyn tego meczu.')
+     WHERE (SELECT p.team_id FROM player p WHERE p.id = NEW.player_id)
+           NOT IN (SELECT m.home_team_id FROM match m WHERE m.id = NEW.match_id
+                   UNION
+                   SELECT m.away_team_id FROM match m WHERE m.id = NEW.match_id);
+END;
+
+-- 7. Drużyny meczu muszą należeć do tego samego turnieju co mecz.
 CREATE TRIGGER trg_match_teams_same_tournament_ins
 BEFORE INSERT ON match
 FOR EACH ROW
@@ -223,6 +253,16 @@ SELECT m.tournament_id,
   JOIN team   t ON t.id = p.team_id
  GROUP BY m.tournament_id, p.id, p.name, t.id, t.name;
 
+-- Wynik serii rzutów karnych (tylko mecze z zapisaną serią).
+CREATE VIEW v_shootout_score AS
+SELECT m.id AS match_id,
+       SUM(CASE WHEN p.team_id = m.home_team_id THEN pk.scored ELSE 0 END) AS home_pens,
+       SUM(CASE WHEN p.team_id = m.away_team_id THEN pk.scored ELSE 0 END) AS away_pens
+  FROM penalty_kick pk
+  JOIN match  m ON m.id = pk.match_id
+  JOIN player p ON p.id = pk.player_id
+ GROUP BY m.id;
+
 -- Terminarz: mecze z nazwami drużyn zamiast ID.
 CREATE VIEW v_match_schedule AS
 SELECT m.id            AS match_id,
@@ -237,10 +277,14 @@ SELECT m.id            AS match_id,
        m.home_score,
        m.away_score,
        m.winner_pen,
+       m.scheduled_at,
+       ss.home_pens,
+       ss.away_pens,
        m.played
   FROM match m
   LEFT JOIN team ht ON ht.id = m.home_team_id
-  LEFT JOIN team at ON at.id = m.away_team_id;
+  LEFT JOIN team at ON at.id = m.away_team_id
+  LEFT JOIN v_shootout_score ss ON ss.match_id = m.id;
 
 -- Historia transferów z nazwami.
 CREATE VIEW v_transfer_history AS

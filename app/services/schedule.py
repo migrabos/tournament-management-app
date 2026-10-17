@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from db.init import get_connection
 
 
@@ -80,6 +82,23 @@ def generate_group_schedule(tournament_id: int) -> None:
         raise
     finally:
         conn.close()
+
+
+DATETIME_FORMAT = "%Y-%m-%d %H:%M"
+
+
+def set_match_datetime(match_id: int, when: str | None) -> None:
+    """Ustawia termin meczu ('YYYY-MM-DD HH:MM') albo go usuwa (None).
+    Termin nie jest nadawany przy generowaniu terminarza — ustala go administrator."""
+    if when is not None:
+        try:
+            when = datetime.strptime(when, DATETIME_FORMAT).strftime(DATETIME_FORMAT)
+        except (TypeError, ValueError) as e:
+            raise ValueError(f"Niepoprawny termin: {when!r} (oczekiwano RRRR-MM-DD GG:MM).") from e
+    with get_connection() as conn:
+        if conn.execute("UPDATE match SET scheduled_at = ? WHERE id = ?",
+                        (when, match_id)).rowcount == 0:
+            raise ValueError(f"Mecz {match_id} nie istnieje.")
 
 
 def get_schedule(tournament_id: int, group_name: str | None = None) -> list[dict]:

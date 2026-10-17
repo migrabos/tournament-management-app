@@ -27,7 +27,7 @@ modelu danych i sposobie realizacji operacji w bazie danych.
 
 ![Schemat bazy danych](docs/schema.png)
 
-Baza składa się z **6 tabel**, **4 widoków** i **7 triggerów**. Poniżej opis encji.
+Baza składa się z **7 tabel**, **5 widoków** i **8 triggerów**. Poniżej opis encji.
 
 ### 2.1. Tabela `tournament`
 

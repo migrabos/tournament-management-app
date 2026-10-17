@@ -491,3 +491,133 @@ class TestMatchDetails(DBTestCase):
         self.assertFalse(d["played"])
         self.assertEqual((d["home_scorers"], d["away_scorers"]), ([], []))
         self.assertIsNone(match_result.get_match_details(999999))
+
+class TestPenaltyShootout(DBTestCase):
+    def _ko_match(self):
+        """Turniej po fazie grupowej; zwraca (tid, półfinał SF_TOP, gracze gosp., gracze gości)."""
+        tid, _ = self._make_tournament()
+        draw.draw_groups(tid)
+        schedule.generate_group_schedule(tid)
+        self._play_all_group_matches(tid)
+        ko = next(f for f in schedule.get_schedule(tid) if f["stage"] == "SF_TOP")
+        home = [p["id"] for p in player_dao.list_players(ko["home_team_id"])]
+        away = [p["id"] for p in player_dao.list_players(ko["away_team_id"])]
+        return tid, ko, home, away
+
+    def test_shootout_not_counted_as_goals_and_decides_winner(self):
+        tid, ko, home, away = self._ko_match()
+        scorers_before = reports.top_scorers(tid, limit=200)
+        # 1:1 i karne 1:2 dla gości (winner_pen wynika z serii)
+        shootout = [(home[0], True), (away[0], True), (home[1], False),
+                    (away[1], True), (home[2], False), (away[2], False)]
+        match_result.save_match_result(ko["match_id"], 1, 1, [home[0], away[0]],
+                                       shootout=shootout)
+
+        self.assertEqual(match_result.get_match(ko["match_id"])["winner_pen"], 1)
+        fx = next(f for f in schedule.get_schedule(tid) if f["match_id"] == ko["match_id"])
+        self.assertEqual((fx["home_pens"], fx["away_pens"]), (1, 2))
+        # w klasyfikacji strzelców doszły tylko 2 bramki z gry, nie karne
+        total = lambda rows: sum(r["goals"] for r in rows)
+        self.assertEqual(total(reports.top_scorers(tid, limit=200)),
+                         total(scorers_before) + 2)
+
+        d = match_result.get_match_details(ko["match_id"])
+        self.assertEqual(len(d["shootout"]), 6)
+        self.assertEqual([k["home"] for k in d["shootout"]], [True, False] * 3)
+        self.assertEqual(match_result.get_match_shootout(ko["match_id"]), shootout)
+
+    def test_invalid_shootouts_rejected(self):
+        tid, ko, home, away = self._ko_match()
+        mid = ko["match_id"]
+        cases = [
+            (0, 0, None, [(home[0], True), (away[0], True)]),   # nierozstrzygnięta
+            (0, 0, 0, [(home[0], False), (away[0], True)]),     # sprzeczna z winner_pen
+            (1, 0, None, [(home[0], True)]),                    # bez remisu
+        ]
+        outsider = next(p["id"] for t in team_dao.list_teams(tid)
+                        if t["id"] not in (ko["home_team_id"], ko["away_team_id"])
+                        for p in player_dao.list_players(t["id"]))
+        cases.append((0, 0, None, [(outsider, True)]))          # obcy zawodnik
+        for hs, as_, wp, so in cases:
+            scorers = [home[0]] * hs + [away[0]] * as_
+            with self.assertRaises(ValueError):
+                match_result.save_match_result(mid, hs, as_, scorers, wp, so)
+        self.assertFalse(match_result.get_match(mid)["played"])
+
+    def test_trigger_blocks_kick_without_shootout(self):
+        tid, ko, home, _ = self._ko_match()
+        match_result.save_match_result(ko["match_id"], 1, 0, [home[0]])
+        import sqlite3
+        with self.assertRaises(sqlite3.IntegrityError):
+            with get_connection() as c:
+                c.execute("INSERT INTO penalty_kick (match_id, kick_no, player_id, scored) "
+                          "VALUES (?, 1, ?, 1)", (ko["match_id"], home[0]))
+
+    def test_edit_replaces_shootout(self):
+        tid, ko, home, away = self._ko_match()
+        mid = ko["match_id"]
+        match_result.save_match_result(mid, 0, 0, [], shootout=[(home[0], True), (away[0], False)])
+        match_result.edit_match_result(mid, 2, 0, [home[0], home[1]])
+        self.assertEqual(match_result.get_match_shootout(mid), [])
+        self.assertIsNone(match_result.get_match(mid)["winner_pen"])
+
+    def test_export_import_keeps_shootout(self):
+        from app.services import backup
+        tid, ko, home, away = self._ko_match()
+        shootout = [(home[0], True), (away[0], False)]
+        match_result.save_match_result(ko["match_id"], 0, 0, [], shootout=shootout)
+
+        data = backup.export_tournament(tid)
+        new_tid = backup.import_tournament(data)
+        new_ko = next(f for f in schedule.get_schedule(new_tid) if f["stage"] == "SF_TOP")
+        d = match_result.get_match_details(new_ko["match_id"])
+        self.assertEqual([(k["home"], k["scored"]) for k in d["shootout"]],
+                         [(True, True), (False, False)])
+
+        # plik sprzed wprowadzenia serii karnych (bez sekcji) też się wczytuje
+        del data["penalty_kicks"]
+        backup.import_tournament(data)
+
+
+class TestMatchDateTime(DBTestCase):
+    def _fixture(self):
+        tid, _ = self._make_tournament()
+        draw.draw_groups(tid)
+        schedule.generate_group_schedule(tid)
+        return tid, next(f for f in schedule.get_schedule(tid) if f["stage"] == "GROUP")
+
+    def test_schedule_generation_leaves_date_empty(self):
+        tid, _ = self._fixture()
+        self.assertTrue(all(f["scheduled_at"] is None for f in schedule.get_schedule(tid)))
+
+    def test_set_change_and_clear(self):
+        tid, fx = self._fixture()
+        schedule.set_match_datetime(fx["match_id"], "2026-10-18 18:30")
+        self.assertEqual(match_result.get_match(fx["match_id"])["scheduled_at"], "2026-10-18 18:30")
+        schedule.set_match_datetime(fx["match_id"], "2026-10-19 9:05")      # normalizacja
+        self.assertEqual(match_result.get_match(fx["match_id"])["scheduled_at"], "2026-10-19 09:05")
+        schedule.set_match_datetime(fx["match_id"], None)
+        self.assertIsNone(match_result.get_match(fx["match_id"])["scheduled_at"])
+
+    def test_invalid_rejected(self):
+        tid, fx = self._fixture()
+        for bad in ("jutro", "2026-13-01 10:00", "2026-10-18"):
+            with self.assertRaises(ValueError):
+                schedule.set_match_datetime(fx["match_id"], bad)
+        with self.assertRaises(ValueError):
+            schedule.set_match_datetime(999999, "2026-10-18 18:30")
+
+    def test_date_survives_result_and_export_import(self):
+        from app.services import backup
+        tid, fx = self._fixture()
+        schedule.set_match_datetime(fx["match_id"], "2026-10-18 18:30")
+        match_result.save_match_result(fx["match_id"], 1, 0, [self._first_player(fx["home_team_id"])])
+        self.assertEqual(match_result.get_match(fx["match_id"])["scheduled_at"], "2026-10-18 18:30")
+
+        data = backup.export_tournament(tid)
+        new_tid = backup.import_tournament(data)
+        dates = [f["scheduled_at"] for f in schedule.get_schedule(new_tid) if f["scheduled_at"]]
+        self.assertEqual(dates, ["2026-10-18 18:30"])
+        for m in data["matches"]:          # plik sprzed wprowadzenia terminów
+            del m["scheduled_at"]
+        backup.import_tournament(data)

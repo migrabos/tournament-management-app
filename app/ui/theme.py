@@ -160,7 +160,7 @@ def stylesheet() -> str:
     QPushButton[danger="true"]:hover {{ background: {c['danger_soft']}; }}
 
     /* Pola wejściowe */
-    QLineEdit, QComboBox, QSpinBox {{
+    QLineEdit, QComboBox, QSpinBox, QDateTimeEdit {{
         background: {c['surface']};
         border: 1px solid {c['input_border']};
         border-radius: 8px;
@@ -169,7 +169,40 @@ def stylesheet() -> str:
         selection-background-color: {c['accent_soft']};
         selection-color: {c['text']};
     }}
-    QLineEdit:focus, QComboBox:focus, QSpinBox:focus {{ border: 1px solid {c['accent']}; }}
+    QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDateTimeEdit:focus {{
+        border: 1px solid {c['accent']};
+    }}
+    QDateTimeEdit::drop-down {{ border: none; width: 22px; }}
+
+    /* Kalendarz (rozwijany z pola daty) */
+    QCalendarWidget QWidget {{ background: {c['surface']}; color: {c['text']}; }}
+    QCalendarWidget QWidget#qt_calendar_navigationbar {{
+        background: {c['header_bg']}; border-bottom: 1px solid {c['border']};
+    }}
+    QCalendarWidget QToolButton {{
+        background: transparent; color: {c['text']}; border: none;
+        border-radius: 6px; padding: 4px 8px; font-weight: 600;
+    }}
+    QCalendarWidget QToolButton:hover {{ background: {c['btn_hover']}; }}
+    QCalendarWidget QToolButton::menu-indicator {{ image: none; }}
+    QCalendarWidget QMenu {{ background: {c['surface']}; color: {c['text']}; }}
+    QCalendarWidget QSpinBox {{ padding: 2px 6px; min-height: 0; }}
+    QCalendarWidget QAbstractItemView {{
+        background: {c['surface']}; color: {c['text']}; outline: none;
+        selection-background-color: {c['accent']}; selection-color: #ffffff;
+    }}
+    QCalendarWidget QAbstractItemView::item:selected {{
+        background: {c['accent']}; color: #ffffff; border-radius: 6px;
+    }}
+    QCalendarWidget QAbstractItemView:disabled {{ color: {c['disabled_text']}; }}
+
+    /* Menu kontekstowe */
+    QMenu {{
+        background: {c['surface']}; color: {c['text']};
+        border: 1px solid {c['border']}; border-radius: 8px; padding: 4px;
+    }}
+    QMenu::item {{ padding: 6px 18px; border-radius: 6px; }}
+    QMenu::item:selected {{ background: {c['accent_soft']}; color: {c['text']}; }}
     QComboBox::drop-down {{ border: none; width: 22px; }}
     QComboBox QAbstractItemView {{
         background: {c['surface']}; border: 1px solid {c['border']};

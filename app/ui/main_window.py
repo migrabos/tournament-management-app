@@ -235,5 +235,5 @@ def run():
     app = QApplication.instance() or QApplication(sys.argv)
     app.setStyleSheet(stylesheet())
     win = AppWindow()
-    win.show()
+    win.showMaximized()   # start zmaksymalizowany; resize() to rozmiar po przywróceniu
     app.exec()

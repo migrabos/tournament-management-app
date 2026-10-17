@@ -2,7 +2,7 @@
 Eksport i import pojedynczego turnieju do pliku JSON.
 
 Eksport zapisuje komplet danych turnieju: drużyny, zawodników, mecze, strzelców,
-transfery i stan. Import zawsze tworzy NOWY turniej (nic nie nadpisuje),
+serie rzutów karnych, transfery i stan. Import zawsze tworzy NOWY turniej (nic nie nadpisuje),
 nadając rekordom nowe ID — dzięki temu plik da się wczytać w dowolnej bazie,
 np. u znajomego.
 """
@@ -60,12 +60,16 @@ def export_tournament(tournament_id: int) -> dict:
                    WHERE t.tournament_id = ? ORDER BY p.id"""),
             "matches": rows(
                 """SELECT id, stage, group_name, round, home_team_id, away_team_id,
-                          home_score, away_score, winner_pen, played
+                          home_score, away_score, winner_pen, played, scheduled_at
                    FROM match WHERE tournament_id = ? ORDER BY id"""),
             "goals": rows(
                 """SELECT g.match_id, g.scorer_id FROM goal g
                    JOIN match m ON m.id = g.match_id
                    WHERE m.tournament_id = ? ORDER BY g.id"""),
+            "penalty_kicks": rows(
+                """SELECT pk.match_id, pk.kick_no, pk.player_id, pk.scored
+                   FROM penalty_kick pk JOIN match m ON m.id = pk.match_id
+                   WHERE m.tournament_id = ? ORDER BY pk.match_id, pk.kick_no"""),
             "transfers": rows(
                 """SELECT player_id, from_team_id, to_team_id, transferred_at
                    FROM transfer WHERE tournament_id = ? ORDER BY id"""),
@@ -111,6 +115,8 @@ def _validate(data) -> None:
         players = {p["id"]: p["team_id"] for p in data["players"]}
         matches = {m["id"]: m for m in data["matches"]}
         goals = [(g["match_id"], g["scorer_id"]) for g in data["goals"]]
+        # Brak sekcji = plik sprzed dodania serii karnych.
+        kicks = [(k["match_id"], k["player_id"]) for k in data.get("penalty_kicks", [])]
         transfers = [(t["player_id"], t["from_team_id"], t["to_team_id"])
                      for t in data["transfers"]]
     except (KeyError, TypeError) as e:
@@ -139,6 +145,13 @@ def _validate(data) -> None:
     for m in matches.values():
         if m["played"] and per_match.get(m["id"], 0) != m["home_score"] + m["away_score"]:
             raise ValueError("Liczba strzelców nie zgadza się z wynikiem meczu.")
+
+    for match_id, player_id in kicks:
+        m = matches.get(match_id)
+        if m is None or player_id not in players:
+            raise ValueError("Rzut karny odwołuje się do nieistniejącego meczu lub zawodnika.")
+        if m["winner_pen"] is None:
+            raise ValueError("Rzut karny przypisany do meczu bez serii karnych.")
 
     for player_id, from_team, to_team in transfers:
         if player_id not in players or from_team not in teams or to_team not in teams:
@@ -185,11 +198,12 @@ def _do_import(data: dict) -> int:
             match_map[m["id"]] = conn.execute(
                 """INSERT INTO match (tournament_id, stage, group_name, round,
                        home_team_id, away_team_id, home_score, away_score,
-                       winner_pen, played)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                       winner_pen, played, scheduled_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (tid, m["stage"], m["group_name"], m["round"],
                  team_map.get(m["home_team_id"]), team_map.get(m["away_team_id"]),
-                 m["home_score"], m["away_score"], m["winner_pen"], m["played"])
+                 m["home_score"], m["away_score"], m["winner_pen"], m["played"],
+                 m.get("scheduled_at"))   # brak w plikach sprzed wprowadzenia terminów
             ).lastrowid
 
         # Trigger trg_goal_scorer_valid sprawdza, czy strzelec gra TERAZ w jednej
@@ -208,6 +222,14 @@ def _do_import(data: dict) -> int:
         )
         if trigger_sql:
             conn.execute(trigger_sql["sql"])
+
+        # Transfery są zablokowane od startu KO, więc wykonawcy karnych wciąż grają
+        # w drużynach meczu — trigger trg_penalty_kick_valid może zostać.
+        conn.executemany(
+            "INSERT INTO penalty_kick (match_id, kick_no, player_id, scored) VALUES (?, ?, ?, ?)",
+            [(match_map[k["match_id"]], k["kick_no"], player_map[k["player_id"]], k["scored"])
+             for k in data.get("penalty_kicks", [])]
+        )
 
         conn.executemany(
             """INSERT INTO transfer (tournament_id, player_id, from_team_id, to_team_id,

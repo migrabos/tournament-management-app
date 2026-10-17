@@ -21,6 +21,42 @@ def _validate_scorers(home_score: int, away_score: int, scorer_ids: list[int]) -
         )
 
 
+def _resolve_shootout(conn, match, home_score: int, away_score: int,
+                      winner_pen: int | None, shootout: list) -> int | None:
+    """Sprawdza serię karnych i zwraca winner_pen.
+    shootout: [(player_id, scored), ...] w kolejności strzałów; pusta lista = bez serii
+    (wtedy liczy się samo winner_pen). Seria musi wyłonić zwycięzcę — jeśli
+    podano też winner_pen, musi się z nim zgadzać."""
+    if not shootout:
+        return winner_pen
+    if match["stage"] == "GROUP" or home_score != away_score:
+        raise ValueError("Rzuty karne tylko po remisie w meczu pucharowym.")
+    team_of = {r["id"]: r["team_id"] for r in conn.execute(
+        "SELECT id, team_id FROM player WHERE team_id IN (?, ?)",
+        (match["home_team_id"], match["away_team_id"]))}
+    home_pens = away_pens = 0
+    for player_id, scored in shootout:
+        if player_id not in team_of:
+            raise ValueError("Wykonawca karnego nie należy do żadnej z drużyn tego meczu.")
+        if team_of[player_id] == match["home_team_id"]:
+            home_pens += bool(scored)
+        else:
+            away_pens += bool(scored)
+    if home_pens == away_pens:
+        raise ValueError(f"Seria karnych nierozstrzygnięta ({home_pens}:{away_pens}).")
+    derived = 0 if home_pens > away_pens else 1
+    if winner_pen is not None and winner_pen != derived:
+        raise ValueError("Zwycięzca po karnych nie zgadza się z przebiegiem serii.")
+    return derived
+
+
+def _insert_shootout(conn, match_id: int, shootout: list) -> None:
+    conn.executemany(
+        "INSERT INTO penalty_kick (match_id, kick_no, player_id, scored) VALUES (?, ?, ?, ?)",
+        [(match_id, i, pid, int(bool(scored))) for i, (pid, scored) in enumerate(shootout, 1)]
+    )
+
+
 def _check_tournament_finished(tournament_id: int) -> None:
     """Jeśli wszystkie mecze turnieju zostały rozegrane — ustawia stan FINISHED."""
     with get_connection() as conn:
@@ -41,16 +77,19 @@ def save_match_result(
     away_score: int,
     scorer_ids: list[int],
     winner_pen: int | None = None,
+    shootout: list[tuple[int, bool]] | None = None,
 ) -> None:
     """
     Atomowo zapisuje wynik meczu i listę strzelców.
     winner_pen: 0 = home wygrał karne, 1 = away wygrał karne, None = bez karnych.
+    shootout: opcjonalny przebieg serii [(player_id, scored), ...] — nie liczy się
+    do klasyfikacji strzelców; jeśli podany, z niego wynika winner_pen.
     Faza grupowa NIE kończy się sama — drabinki KO tworzy dopiero
     confirm_group_stage() (przycisk „Zatwierdź fazę grupową”).
     Retry przy sqlite3.OperationalError (database is locked).
     """
     with_retry(_do_save_match_result, match_id, home_score, away_score,
-               scorer_ids, winner_pen)
+               scorer_ids, winner_pen, shootout or [])
 
 
 def _do_save_match_result(
@@ -59,6 +98,7 @@ def _do_save_match_result(
     away_score: int,
     scorer_ids: list[int],
     winner_pen: int | None,
+    shootout: list,
 ) -> None:
     _validate_scorers(home_score, away_score, scorer_ids)
 
@@ -79,6 +119,8 @@ def _do_save_match_result(
 
         tournament_id = match["tournament_id"]
         stage = match["stage"]
+        winner_pen = _resolve_shootout(conn, match, home_score, away_score,
+                                       winner_pen, shootout)
 
         conn.execute(
             """UPDATE match
@@ -92,6 +134,7 @@ def _do_save_match_result(
                 "INSERT INTO goal (match_id, scorer_id) VALUES (?, ?)",
                 (match_id, scorer_id)
             )
+        _insert_shootout(conn, match_id, shootout)
 
         conn.commit()
 
@@ -215,14 +258,15 @@ def edit_match_result(
     away_score: int,
     scorer_ids: list[int],
     winner_pen: int | None = None,
+    shootout: list[tuple[int, bool]] | None = None,
 ) -> None:
     """Edytuje wynik już rozegranego meczu (transakcja).
-    Usuwa poprzednich strzelców, zapisuje nowy wynik i nowych strzelców.
+    Usuwa poprzednich strzelców i serię karnych, zapisuje nowy wynik i nowych strzelców.
     Dla półfinału KO ponownie propaguje zwycięzcę/przegranego do meczów zależnych.
     Retry przy sqlite3.OperationalError (database is locked).
     """
     with_retry(_do_edit_match_result, match_id, home_score, away_score,
-               scorer_ids, winner_pen)
+               scorer_ids, winner_pen, shootout or [])
 
 
 def _do_edit_match_result(
@@ -231,6 +275,7 @@ def _do_edit_match_result(
     away_score: int,
     scorer_ids: list[int],
     winner_pen: int | None,
+    shootout: list,
 ) -> None:
     _validate_scorers(home_score, away_score, scorer_ids)
 
@@ -251,7 +296,11 @@ def _do_edit_match_result(
         tournament_id = match["tournament_id"]
         stage = match["stage"]
 
+        winner_pen = _resolve_shootout(conn, match, home_score, away_score,
+                                       winner_pen, shootout)
+
         conn.execute("DELETE FROM goal WHERE match_id = ?", (match_id,))
+        conn.execute("DELETE FROM penalty_kick WHERE match_id = ?", (match_id,))
         conn.execute(
             """UPDATE match
                SET home_score = ?, away_score = ?, winner_pen = ?, played = 1
@@ -263,6 +312,7 @@ def _do_edit_match_result(
                 "INSERT INTO goal (match_id, scorer_id) VALUES (?, ?)",
                 (match_id, scorer_id)
             )
+        _insert_shootout(conn, match_id, shootout)
 
         conn.commit()
 
@@ -316,7 +366,8 @@ def get_match_scorer_counts(match_id: int) -> dict[int, int]:
 def get_match_details(match_id: int) -> dict | None:
     """
     Szczegóły meczu do wyświetlenia: drużyny, wynik, karne i strzelcy
-    rozdzieleni na gospodarzy i gości ({"name", "goals"}, posortowani malejąco).
+    rozdzieleni na gospodarzy i gości ({"name", "goals"}, posortowani malejąco),
+    oraz seria karnych ("shootout", "home_pens", "away_pens").
 
     Strona strzelca: jego obecna drużyna, a jeśli od tamtej pory przeszedł
     transferem gdzie indziej — drużyna meczu, z której odszedł.
@@ -343,6 +394,12 @@ def get_match_details(match_id: int) -> dict | None:
                ORDER BY goals DESC, p.name""",
             (m["home_team_id"], m["away_team_id"], match_id)
         ).fetchall()
+        kicks = conn.execute(
+            """SELECT pk.kick_no, pk.scored, p.name, p.team_id
+               FROM penalty_kick pk JOIN player p ON p.id = pk.player_id
+               WHERE pk.match_id = ? ORDER BY pk.kick_no""",
+            (match_id,)
+        ).fetchall()
 
     details = dict(m)
     details["home_scorers"], details["away_scorers"] = [], []
@@ -351,4 +408,23 @@ def get_match_details(match_id: int) -> dict | None:
             else r["former_team_id"]
         side = "home_scorers" if team == m["home_team_id"] else "away_scorers"
         details[side].append({"name": r["name"], "goals": r["goals"]})
+
+    # Seria karnych: transfery są zablokowane od startu KO, więc obecna
+    # drużyna wykonawcy to drużyna z meczu.
+    details["shootout"] = [
+        {"kick_no": k["kick_no"], "name": k["name"], "scored": bool(k["scored"]),
+         "home": k["team_id"] == m["home_team_id"]}
+        for k in kicks]
+    details["home_pens"] = sum(k["scored"] for k in details["shootout"] if k["home"])
+    details["away_pens"] = sum(k["scored"] for k in details["shootout"] if not k["home"])
     return details
+
+
+def get_match_shootout(match_id: int) -> list[tuple[int, bool]]:
+    """Przebieg serii karnych [(player_id, scored), ...] w kolejności strzałów."""
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT player_id, scored FROM penalty_kick WHERE match_id = ? ORDER BY kick_no",
+            (match_id,)
+        ).fetchall()
+    return [(r["player_id"], bool(r["scored"])) for r in rows]
