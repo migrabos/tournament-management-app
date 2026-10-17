@@ -49,6 +49,8 @@ class ListPage(QWidget):
         b_import.clicked.connect(self._import)
         b_open = button("Otwórz")
         b_open.clicked.connect(self._open)
+        b_ren = button("Zmień nazwę")
+        b_ren.clicked.connect(self._rename)
         b_del = button("Usuń", danger=True)
         b_del.clicked.connect(self._delete)
         b_ref = button("Odśwież")
@@ -57,6 +59,7 @@ class ListPage(QWidget):
         bar.addWidget(b_demo)
         bar.addWidget(b_import)
         bar.addWidget(b_open)
+        bar.addWidget(b_ren)
         bar.addWidget(b_del)
         bar.addWidget(b_ref)
         bar.addStretch()
@@ -91,9 +94,17 @@ class ListPage(QWidget):
 
     def _create(self):
         name, ok = QInputDialog.getText(self, "Nowy turniej", "Nazwa turnieju:")
-        if ok and name.strip():
-            tournament_dao.create_tournament(name.strip())
-            self.refresh()
+        name = name.strip()
+        if not ok or not name:
+            return
+        if tournament_dao.name_taken(name):
+            if QMessageBox.question(
+                    self, "Nazwa zajęta",
+                    f"Turniej o nazwie „{name}” już istnieje. Utworzyć drugi o tej samej nazwie?"
+            ) != QMessageBox.Yes:
+                return
+        tournament_dao.create_tournament(name)
+        self.refresh()
 
     def _create_demo(self):
         QApplication.setOverrideCursor(Qt.WaitCursor)
@@ -109,7 +120,8 @@ class ListPage(QWidget):
 
     def _import(self):
         path, _ = QFileDialog.getOpenFileName(
-            self, "Importuj turniej", "", "Turniej (*.json);;Wszystkie pliki (*)")
+            self, "Importuj turniej", str(backup.exports_dir()),
+            "Turniej (*.json);;Wszystkie pliki (*)")
         if not path:
             return
         try:
@@ -126,6 +138,26 @@ class ListPage(QWidget):
             QMessageBox.information(self, "Info", "Wybierz turniej z listy.")
             return
         self.on_open(tid)
+
+    def _rename(self):
+        tid = self._selected_id()
+        if tid is None:
+            QMessageBox.information(self, "Info", "Wybierz turniej z listy.")
+            return
+        current = tournament_dao.get_tournament(tid)["name"]
+        name, ok = QInputDialog.getText(self, "Zmień nazwę", "Nowa nazwa turnieju:", text=current)
+        name = name.strip()
+        if not ok or not name or name == current:
+            return
+        if tournament_dao.name_taken(name, exclude_id=tid):
+            if QMessageBox.question(
+                    self, "Nazwa zajęta",
+                    f"Turniej o nazwie „{name}” już istnieje.\n"
+                    "Na liście będą dwa turnieje o tej samej nazwie. Zmienić mimo to?"
+            ) != QMessageBox.Yes:
+                return
+        tournament_dao.rename_tournament(tid, name)
+        self.refresh()
 
     def _delete(self):
         tid = self._selected_id()

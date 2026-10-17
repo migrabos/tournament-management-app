@@ -241,7 +241,8 @@ class TournamentPage(QWidget):
         name = tournament_dao.get_tournament(self.tournament_id)["name"]
         safe = "".join(c if c.isalnum() or c in " -_()" else "_" for c in name).strip()
         path, _ = QFileDialog.getSaveFileName(
-            self, "Eksportuj turniej", f"{safe or 'turniej'}.json", "Turniej (*.json)")
+            self, "Eksportuj turniej",
+            str(backup.exports_dir() / f"{safe or 'turniej'}.json"), "Turniej (*.json)")
         if not path:
             return
         try:

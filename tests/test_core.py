@@ -419,3 +419,34 @@ class TestExportImport(DBTestCase):
             backup.import_from_file(broken)
 
         self.assertEqual(len(tournament_dao.list_tournaments()), count_before)
+
+
+class TestRenameTournament(DBTestCase):
+    def test_rename_keeps_all_data(self):
+        tid, teams = self._make_tournament(name="Stara nazwa")
+        draw.draw_groups(tid)
+        schedule.generate_group_schedule(tid)
+        self._play_all_group_matches(tid)
+        before = (reports.group_table(tid, "A"), reports.top_scorers(tid))
+
+        tournament_dao.rename_tournament(tid, "  Nowa nazwa  ")
+
+        self.assertEqual(tournament_dao.get_tournament(tid)["name"], "Nowa nazwa")
+        self.assertEqual((reports.group_table(tid, "A"), reports.top_scorers(tid)), before)
+        self.assertEqual(tournament_dao.get_state(tid), "KO")
+
+    def test_empty_name_rejected(self):
+        tid = tournament_dao.create_tournament("Cup")
+        with self.assertRaises(ValueError):
+            tournament_dao.rename_tournament(tid, "   ")
+        self.assertEqual(tournament_dao.get_tournament(tid)["name"], "Cup")
+
+    def test_name_taken(self):
+        a = tournament_dao.create_tournament("Liga")
+        b = tournament_dao.create_tournament("Puchar")
+        self.assertTrue(tournament_dao.name_taken("liga"))            # wielkość liter bez znaczenia
+        self.assertFalse(tournament_dao.name_taken("Liga", exclude_id=a))  # własna nazwa się nie liczy
+        self.assertTrue(tournament_dao.name_taken("Liga", exclude_id=b))
+        self.assertFalse(tournament_dao.name_taken("Turniej"))
+        tournament_dao.create_tournament("Puchar Łodzi")
+        self.assertTrue(tournament_dao.name_taken("PUCHAR ŁODZI"))

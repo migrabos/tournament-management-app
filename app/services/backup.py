@@ -9,6 +9,7 @@ np. u znajomego.
 import json
 import pathlib
 import sqlite3
+import sys
 from datetime import datetime
 
 from db.init import get_connection, with_retry
@@ -16,6 +17,20 @@ from db.init import get_connection, with_retry
 FORMAT = "tournament-manager"
 VERSION = 1
 IMPORT_SUFFIX = " (import)"
+
+# Domyślny folder na eksporty: obok pliku .exe albo w katalogu głównym projektu
+# (przy uruchomieniu `python main.py`). W repo jest ignorowany przez .gitignore.
+if getattr(sys, "frozen", False) or "__compiled__" in globals():   # PyInstaller / Nuitka
+    APP_DIR = pathlib.Path(sys.argv[0]).resolve().parent
+else:
+    APP_DIR = pathlib.Path(__file__).resolve().parents[2]
+EXPORTS_DIR = APP_DIR / "exports"
+
+
+def exports_dir() -> pathlib.Path:
+    """Zwraca folder eksportów, tworząc go w razie potrzeby."""
+    EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
+    return EXPORTS_DIR
 
 
 # ---------------------------------------------------------------- eksport
