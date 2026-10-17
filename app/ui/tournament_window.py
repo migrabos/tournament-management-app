@@ -333,7 +333,17 @@ class TournamentPage(QWidget):
         cl = QVBoxLayout(self.groups_content)
         cl.setContentsMargins(0, 0, 0, 0)
         cl.setSpacing(8)
-        cl.addWidget(muted("Dwuklik meczu, aby wpisać lub edytować wynik."))
+        top = QHBoxLayout()
+        top.addWidget(muted("Dwuklik meczu, aby wpisać lub edytować wynik."))
+        top.addStretch()
+        self.group_progress = muted("")
+        top.addWidget(self.group_progress)
+        self.btn_confirm_groups = primary_button("Zatwierdź fazę grupową")
+        self.btn_confirm_groups.setToolTip(
+            "Tworzy drabinki KO. Po zatwierdzeniu wyniki grup są zablokowane.")
+        self.btn_confirm_groups.clicked.connect(self._confirm_groups)
+        top.addWidget(self.btn_confirm_groups)
+        cl.addLayout(top)
 
         cols_row = QHBoxLayout()
         cols_row.setSpacing(16)
@@ -378,6 +388,19 @@ class TournamentPage(QWidget):
         self.groups_content.setVisible(drawn)
         if not drawn:
             return
+
+        state = self._state()
+        played, total = match_result.group_stage_status(self.tournament_id)
+        in_group = state == "GROUP"
+        self.btn_confirm_groups.setVisible(in_group)
+        self.btn_confirm_groups.setEnabled(in_group and total > 0 and played == total)
+        if not in_group:
+            self.group_progress.setText("Faza grupowa zatwierdzona ✓")
+        elif total == 0:
+            self.group_progress.setText("Wygeneruj terminarz w zakładce „Losowanie”")
+        else:
+            self.group_progress.setText(f"Rozegrano {played} z {total} meczów")
+
         for gname, tv in self.group_tables.items():
             tv.setRowCount(0)
             for row in reports.group_table(self.tournament_id, gname):
@@ -404,6 +427,24 @@ class TournamentPage(QWidget):
             tbl.setItem(r, 1, self._item(fx["home_team_name"], align=Qt.AlignRight | Qt.AlignVCenter))
             tbl.setItem(r, 2, self._item(score, center=True))
             tbl.setItem(r, 3, self._item(fx["away_team_name"], align=Qt.AlignLeft | Qt.AlignVCenter))
+
+    def _confirm_groups(self):
+        answer = QMessageBox.question(
+            self, "Zatwierdź fazę grupową",
+            "Zatwierdzić wyniki fazy grupowej i utworzyć drabinki pucharowe?\n\n"
+            "Po zatwierdzeniu wyników grup nie da się już edytować "
+            "(można jedynie zresetować cały turniej).",
+            QMessageBox.Yes | QMessageBox.Cancel, QMessageBox.Cancel,
+        )
+        if answer != QMessageBox.Yes:
+            return
+        try:
+            match_result.confirm_group_stage(self.tournament_id)
+        except Exception as e:
+            QMessageBox.critical(self, "Błąd", str(e))
+            return
+        self.refresh_all()
+        self.tabs.setCurrentIndex(3)  # zakładka „Drabinki KO”
 
     # ---------- TAB 4: drabinki KO ----------
     def _build_ko_tab(self):
