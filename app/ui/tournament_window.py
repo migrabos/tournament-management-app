@@ -5,6 +5,10 @@ from PySide6.QtWidgets import (
     QTableWidgetItem, QTreeWidget, QTreeWidgetItem, QHeaderView,
     QInputDialog, QMessageBox, QSplitter, QFileDialog, QMenu,
 )
+import os
+import sys
+import threading
+
 from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QDesktopServices
 
@@ -22,6 +26,16 @@ from app.ui.dialogs import (
 )
 
 UID = Qt.UserRole
+
+
+def _open_in_system(path) -> None:
+    """Otwiera plik/folder domyślnym programem bez blokowania okna.
+    Na Windows ShellExecute (QDesktopServices.openUrl) czeka na start przeglądarki
+    zdjęć — na Windows 10 trwa to długo i program „nie odpowiada”, więc idzie w tle."""
+    if sys.platform == "win32":
+        threading.Thread(target=os.startfile, args=(str(path),), daemon=True).start()
+    else:
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
 
 
 class TournamentPage(QWidget):
@@ -701,9 +715,9 @@ class TournamentPage(QWidget):
         box.addButton("Zamknij", QMessageBox.RejectRole)
         box.exec()
         if box.clickedButton() is open_img:
-            QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
+            _open_in_system(path)
         elif box.clickedButton() is open_dir:
-            QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
+            _open_in_system(folder)
 
     # ---------- wspólne: wynik ----------
     def _match_subtitle(self, m) -> str:
