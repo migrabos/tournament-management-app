@@ -13,7 +13,22 @@ def add_player(team_id: int, name: str) -> int:
 
 
 def delete_player(player_id: int) -> None:
+    """Usuwa zawodnika — tylko w fazie konfiguracji (SETUP).
+    Później usunięcie skasowałoby jego gole (kaskada), a wyniki meczów zostałyby,
+    przez co strzelcy przestaliby się zgadzać z wynikami."""
     with get_connection() as conn:
+        row = conn.execute(
+            """SELECT t.state FROM player p
+               JOIN team tm ON tm.id = p.team_id
+               JOIN tournament t ON t.id = tm.tournament_id
+               WHERE p.id = ?""",
+            (player_id,)
+        ).fetchone()
+        if row is None:
+            return
+        if row["state"] != "SETUP":
+            raise ValueError("Zawodników usuwasz tylko w fazie konfiguracji "
+                             "(przed losowaniem grup).")
         conn.execute("DELETE FROM player WHERE id = ?", (player_id,))
 
 

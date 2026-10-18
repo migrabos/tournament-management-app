@@ -690,3 +690,22 @@ class TestScheduleHomeAway(DBTestCase):
                 self.assertNotIn("HHH", seq, f"drużyna {t}: {seq}")
                 self.assertNotIn("AAA", seq, f"drużyna {t}: {seq}")
                 self.assertIn(seq.count("H"), (2, 3), f"drużyna {t}: {seq}")
+
+
+class TestDeletePlayer(DBTestCase):
+    def test_delete_only_in_setup(self):
+        tid, teams = self._make_tournament()
+        removable = self._first_player(teams[0])
+        player_dao.delete_player(removable)                 # SETUP — wolno
+        self.assertIsNone(player_dao.get_player(removable))
+
+        draw.draw_groups(tid)
+        schedule.generate_group_schedule(tid)
+        fx = next(f for f in schedule.get_schedule(tid) if f["stage"] == "GROUP")
+        scorer = self._first_player(fx["home_team_id"])
+        match_result.save_match_result(fx["match_id"], 1, 0, [scorer])
+
+        with self.assertRaises(ValueError):                 # po losowaniu — zablokowane
+            player_dao.delete_player(scorer)
+        self.assertIsNotNone(player_dao.get_player(scorer))
+        self.assertEqual(match_result.get_match_scorer_counts(fx["match_id"]), {scorer: 1})

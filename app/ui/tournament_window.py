@@ -238,8 +238,16 @@ class TournamentPage(QWidget):
         row = self.players_table.currentRow()
         if row < 0:
             return
-        pid = self.players_table.item(row, 0).data(UID)
-        player_dao.delete_player(pid)
+        if self._state() != "SETUP":
+            QMessageBox.information(self, "Info", "Zawodników usuwasz tylko w fazie konfiguracji.")
+            return
+        item = self.players_table.item(row, 0)
+        if QMessageBox.question(self, "Potwierdź", f"Usunąć zawodnika {item.text()}?") != QMessageBox.Yes:
+            return
+        try:
+            player_dao.delete_player(item.data(UID))
+        except ValueError as e:
+            QMessageBox.information(self, "Info", str(e))
         self._refresh_players()
 
     def _safe_name(self) -> str:
