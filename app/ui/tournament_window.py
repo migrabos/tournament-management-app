@@ -366,7 +366,7 @@ class TournamentPage(QWidget):
         self.group_progress = muted("")
         top.addWidget(self.group_progress)
         btn_round_img = button("Grafika kolejki")
-        btn_round_img.setToolTip("Eksport PNG z wynikami kolejki i tabelami grup (np. na Facebooka).")
+        btn_round_img.setToolTip("Eksport PNG z wynikami kolejki i tabelami grup")
         btn_round_img.clicked.connect(self._export_round_graphic)
         top.addWidget(btn_round_img)
         btn_group_img = button("Grafika kolejki grupy")
