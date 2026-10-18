@@ -276,6 +276,29 @@ def _icon_path() -> pathlib.Path:
         return pathlib.Path(sys._MEIPASS) / "assets" / "icon.ico"
     return pathlib.Path(__file__).resolve().parents[2] / "assets" / "icon.ico"
 
+def _install_error_handler(app: QApplication) -> None:
+    """Nieobsłużony błąd: zapis do error.log obok bazy i komunikat zamiast cichego
+    zamknięcia programu (w .exe bez konsoli wyjątek po prostu go wyłączał)."""
+    import traceback
+    from datetime import datetime
+    from db.init import DATA_DIR
+    log_path = DATA_DIR / "error.log"
+
+    def hook(exc_type, exc, tb):
+        text = "".join(traceback.format_exception(exc_type, exc, tb))
+        try:
+            with open(log_path, "a", encoding="utf-8") as f:
+                f.write(f"--- {datetime.now():%Y-%m-%d %H:%M:%S}  "
+                        f"{APP_NAME} v{APP_VERSION}\n{text}\n")
+            where = f"Szczegóły zapisano w pliku:\n{log_path}"
+        except OSError:
+            where = text
+        QMessageBox.critical(app.activeWindow(), "Nieoczekiwany błąd",
+                             f"{exc_type.__name__}: {exc}\n\n{where}")
+
+    sys.excepthook = hook
+
+
 def run():
     if sys.platform == "win32":
         # bez tego Windows przy `python main.py` pokazuje na pasku zadań ikonkę Pythona
@@ -283,6 +306,7 @@ def run():
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("migrabos.tournament_manager")
 
     app = QApplication.instance() or QApplication(sys.argv)
+    _install_error_handler(app)
     icon = _icon_path()
     if icon.exists():
         app.setWindowIcon(QIcon(str(icon)))   # pasek tytułowy, pasek zadań i wszystkie okienka

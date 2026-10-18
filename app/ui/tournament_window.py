@@ -703,7 +703,14 @@ class TournamentPage(QWidget):
             QMessageBox.information(self, "Grafika", str(e))
             return
         # zapis od razu do folderu grafik turnieju (ponowny eksport nadpisuje plik)
-        folder = backup.graphics_dir(self._safe_name())
+        try:
+            folder = backup.graphics_dir(self._safe_name())
+        except OSError as e:
+            QMessageBox.critical(self, "Błąd zapisu",
+                f"Nie można utworzyć folderu na grafiki:\n{e}\n\n"
+                "Przenieś program do folderu z prawem zapisu (np. Dokumenty), "
+                "nie do Program Files.")
+            return
         path = folder / filename
         if not img.save(str(path), "PNG"):
             QMessageBox.critical(self, "Błąd", f"Nie udało się zapisać pliku:\n{path}")
