@@ -180,7 +180,7 @@ def render_round(tournament_id: int, round_no: int) -> QImage:
     fixtures_h = 46 + 10 + max(len(v) for v in by_group.values()) * ROW_H + 10
     table_h = 46 + TABLE_ROW_H + max(len(v) for v in tables.values()) * TABLE_ROW_H + 8
     head_h = 160
-    height = head_h + 34 + fixtures_h + 26 + 26 + table_h + 40
+    height = head_h + 34 + fixtures_h + 26 + table_h + 40
 
     img, p = _new_image(height)
     _header(p, tournament, f"{round_no}. KOLEJKA", _dates_label(matches))
@@ -195,9 +195,6 @@ def render_round(tournament_id: int, round_no: int) -> QImage:
             ry += ROW_H
 
     y += fixtures_h + 26
-    _text(p, QRectF(MARGIN, y - 4, WIDTH - 2 * MARGIN, 24), f"TABELE PO {round_no}. KOLEJCE",
-          14, weight=QFont.Bold, color="muted", align=Qt.AlignCenter, spacing=2.5)
-    y += 26
     for i, g in enumerate(groups[:2]):
         x = MARGIN + i * (col_w + GAP)
         body = _card(p, QRectF(x, y, col_w, table_h), f"GRUPA {g}")
