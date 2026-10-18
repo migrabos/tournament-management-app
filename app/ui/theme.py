@@ -279,6 +279,14 @@ def stylesheet() -> str:
     QTabBar::tab:selected {{ color: {c['accent_text']}; border-bottom: 2px solid {c['accent']}; font-weight: 600; }}
     QTabBar::tab:hover:!selected {{ color: {c['text']}; }}
 
+    /* Stopka (znak wodny) */
+    QLabel#footerName {{ color: {c['accent_text']}; font-weight: 600; font-size: 9pt; }}
+    QLabel#footerVersion {{
+        background: {c['accent_soft']}; color: {c['accent_text']};
+        border-radius: 6px; padding: 1px 7px; font-size: 8pt; font-weight: 700;
+    }}
+    QLabel#footerBy {{ color: {c['muted']}; font-size: 9pt; }}
+
     QLabel#groupTitle {{ font-size: 11pt; font-weight: 600; color: {c['text']}; }}
     QLabel#emptyTitle {{ font-size: 13pt; font-weight: 600; color: {c['empty_title']}; }}
     QFrame#sep {{ background: {c['border']}; max-height: 1px; min-height: 1px; }}

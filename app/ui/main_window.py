@@ -4,10 +4,12 @@ import pathlib
 
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QStackedWidget,
-    QTableWidgetItem, QInputDialog, QMessageBox, QHeaderView, QFileDialog,
+    QTableWidgetItem, QInputDialog, QMessageBox, QHeaderView, QFileDialog, QLabel,
 )
 from PySide6.QtCore import Qt, QSettings
+from PySide6.QtGui import QIcon, QPixmap
 
+from app import APP_NAME, APP_VERSION, APP_AUTHOR
 from app.dao import tournament_dao
 from app.services import demo, backup
 from app.ui.theme import stylesheet, toggle_mode, set_mode, current_mode
@@ -15,7 +17,6 @@ from app.ui.widgets import (
     primary_button, button, h1, muted, table, status_badge, center_headers, PAGE_MARGIN_X,
 )
 from app.ui.tournament_window import TournamentPage
-from PySide6.QtGui import QIcon
 
 UID = Qt.UserRole
 
@@ -221,6 +222,27 @@ class AppWindow(QMainWindow):
         self.list_page = ListPage(on_open=self._open_tournament)
         self.stack.addWidget(self.list_page)
         self.tournament_page = None
+
+        outer.addLayout(self._footer())
+
+    def _footer(self) -> QHBoxLayout:
+        """Znak wodny w prawym dolnym rogu: ikonka · nazwa · wersja · autor."""
+        row = QHBoxLayout()
+        row.setContentsMargins(PAGE_MARGIN_X, 0, PAGE_MARGIN_X, 0)
+        row.setSpacing(6)
+        row.addStretch()
+        icon = _icon_path()
+        if icon.exists():
+            logo = QLabel()
+            logo.setPixmap(QPixmap(str(icon)).scaled(16, 16, Qt.KeepAspectRatio,
+                                                     Qt.SmoothTransformation))
+            row.addWidget(logo)
+        for text, name in ((APP_NAME, "footerName"), (f"v{APP_VERSION}", "footerVersion"),
+                           (f"·  by <b>{APP_AUTHOR}</b>", "footerBy")):
+            lbl = QLabel(text)
+            lbl.setObjectName(name)
+            row.addWidget(lbl, alignment=Qt.AlignVCenter)
+        return row
 
     def _open_tournament(self, tid):
         if self.tournament_page is not None:
