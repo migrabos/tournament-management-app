@@ -10,4 +10,7 @@ exports/
 build/
 dist/
 *.spec
+!Menedżer Turnieju.spec
 *.json
+error.log
+
