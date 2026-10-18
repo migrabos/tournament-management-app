@@ -7,7 +7,8 @@
   - render_group_round(tid, n, g) — kolejka jednej grupy: mecze z wynikami i strzelcami.
 
 Styl jest stały (niezależny od motywu aplikacji), żeby kolejne grafiki
-wyglądały spójnie. Rysowane w 2x dla ostrości.
+wyglądały spójnie. Dłuższy bok obrazu ma zawsze 2048 px — to maksimum, do którego
+Facebook zmniejsza zdjęcia; w tym rozmiarze nie skaluje ich ponownie (mniej rozmycia).
 """
 from datetime import datetime
 
@@ -20,7 +21,7 @@ from app.dao import tournament_dao
 from app.services import schedule, match_result
 from app.reports import reports
 
-SCALE = 2
+LONG_SIDE_PX = 2048     # docelowy dłuższy bok PNG (limit Facebooka)
 WIDTH = 1400
 MARGIN = 40
 GAP = 30
@@ -106,11 +107,12 @@ def _header(p: QPainter, tournament: str, title: str, subtitle: str) -> float:
 
 
 def _new_image(height: float) -> tuple[QImage, QPainter]:
-    img = QImage(int(WIDTH * SCALE), int(height * SCALE), QImage.Format_ARGB32)
+    scale = LONG_SIDE_PX / max(WIDTH, height)       # układ w px logicznych → 2048 px
+    img = QImage(round(WIDTH * scale), round(height * scale), QImage.Format_ARGB32)
     img.fill(QColor(C["bg"]))
     p = QPainter(img)
     p.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing)
-    p.scale(SCALE, SCALE)
+    p.scale(scale, scale)
     return img, p
 
 
