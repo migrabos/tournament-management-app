@@ -1,0 +1,79 @@
+MENEDŻER TURNIEJU — INSTRUKCJA
+==============================
+
+URUCHOMIENIE
+------------
+1. Rozpakuj cały folder "Menedżer Turnieju" do zwykłego miejsca,
+   np. Dokumenty\Menedżer Turnieju.
+2. Uruchom plik "Menedżer Turnieju.exe".
+
+   Nie usuwaj ani nie przenoś folderu "_internal" — program bez niego nie działa.
+
+!! NIE ROZPAKOWUJ DO "C:\Program Files" !!
+   Program zapisuje dane obok siebie, a Windows blokuje zapis w Program Files.
+
+Wymagania: Windows 10 lub 11 (64-bit). Python nie jest potrzebny.
+
+
+GDZIE SĄ MOJE DANE
+------------------
+W folderze programu (obok pliku .exe):
+
+  tournament.db          — wszystkie turnieje (baza danych)
+  exports\turnieje\      — pliki eksportu/importu turniejów (.json)
+  exports\grafiki\       — grafiki z wynikami na Facebooka (.png),
+                           osobny podfolder dla każdego turnieju
+  error.log              — pojawia się tylko, gdy wystąpi błąd
+
+Kopia zapasowa: na stronie turnieju kliknij "Eksportuj turniej".
+
+
+AKTUALIZACJA DO NOWEJ WERSJI
+----------------------------
+1. Rozpakuj nową wersję do NOWEGO folderu.
+2. Skopiuj ze starego folderu do nowego:
+   - plik tournament.db,
+   - folder exports (jeśli chcesz zachować grafiki i eksporty).
+3. Uruchom program z nowego folderu. Stary folder możesz usunąć.
+
+
+GRAFIKI 
+--------------------
+Przyciski "Grafika ..." w zakładkach Grupy, Drabinki KO i Królowie strzelców
+zapisują obraz PNG od razu do folderu exports\grafiki\<nazwa turnieju>\.
+Ponowny eksport tej samej grafiki nadpisuje plik.
+
+
+
+ROZWIĄZYWANIE PROBLEMÓW
+-----------------------
+* Grafika się nie otwiera — kręci się kółko i nic się nie dzieje
+  To problem aplikacji "Zdjęcia" w Windows, nie samego pliku.
+  1. Prawy przycisk na grafice -> "Otwórz za pomocą" -> Paint
+     (jeśli się otworzy, plik jest w porządku).
+  2. Ctrl+Shift+Esc (Menedżer zadań) -> zakończ wszystkie
+     "Zdjęcia Microsoft" / Microsoft.Photos.exe.
+  3. Ustawienia -> Aplikacje -> Zdjęcia Microsoft -> Opcje zaawansowane
+     -> "Napraw", a jeśli nie pomoże, "Resetuj".
+  4. Albo ustaw inną przeglądarkę na stałe: prawy przycisk na pliku PNG
+     -> "Otwórz za pomocą" -> "Wybierz inną aplikację" -> np. Paint
+     lub przeglądarka internetowa, zaznacz "Zawsze używaj tej aplikacji".
+
+* "Nie można utworzyć folderu" / błąd zapisu
+  Program leży w folderze bez prawa zapisu (np. Program Files).
+  Przenieś cały folder programu np. do Dokumentów.
+
+* Windows ostrzega przed uruchomieniem ("System Windows ochronił komputer")
+  Program nie ma płatnego podpisu cyfrowego. Kliknij "Więcej informacji"
+  -> "Uruchom mimo to".
+
+* Program pokazał "Nieoczekiwany błąd"
+  Szczegóły są w pliku error.log w folderze programu — prześlij go autorom.
+
+
+LICENCJA
+--------
+Program: licencja MIT (plik LICENSE).
+Wykorzystane biblioteki (Qt/PySide6 — LGPL-3.0 i inne): THIRD-PARTY-NOTICES.txt.
+
+Autorzy: Michał Graboś, Kacper Drożyński

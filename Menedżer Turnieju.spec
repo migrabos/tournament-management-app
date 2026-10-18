@@ -52,7 +52,7 @@ coll = COLLECT(
     name=APP_NAME,
 )
 
-# Licencje obok pliku .exe (nie w _internal), żeby były widoczne dla użytkownika.
+# Instrukcja i licencje obok pliku .exe (nie w _internal), żeby były widoczne dla użytkownika.
 out = Path(DISTPATH) / APP_NAME
-for f in ('LICENSE', 'THIRD-PARTY-NOTICES.txt'):
+for f in ('INSTRUKCJA.txt', 'LICENSE', 'THIRD-PARTY-NOTICES.txt'):
     shutil.copy(f, out / f)
