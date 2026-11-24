@@ -2,7 +2,6 @@ import sqlite3
 from db.init import get_connection, with_retry
 
 MAX_SQUAD = 10
-MIN_SQUAD = 5
 
 
 def transfer_player(player_id: int, to_team_id: int) -> None:
@@ -51,16 +50,6 @@ def _do_transfer(player_id: int, to_team_id: int) -> None:
 
         if squad_size >= MAX_SQUAD:
             raise ValueError(f"Drużyna docelowa ma już {MAX_SQUAD} zawodników (limit składu).")
-
-        # Sprawdź minimum składu drużyny źródłowej
-        from_squad_size = conn.execute(
-            "SELECT COUNT(*) as cnt FROM player WHERE team_id = ?", (from_team_id,)
-        ).fetchone()["cnt"]
-
-        if from_squad_size <= MIN_SQUAD:
-            raise ValueError(
-                f"Drużyna źródłowa musi mieć min. {MIN_SQUAD} zawodników "
-                f"(ma {from_squad_size}) — nie można jej dalej osłabiać.")
 
         # Kluczowy warunek: WHERE team_id=from_team_id zabezpiecza przed wyścigiem.
         # Jeśli inny wątek zdążył przenieść zawodnika wcześniej, UPDATE zmieni 0 wierszy.

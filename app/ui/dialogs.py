@@ -416,7 +416,7 @@ class TransferDialog(QDialog):
         grid.addWidget(self.team_cb, 1, 1)
         root.addLayout(grid)
 
-        root.addWidget(muted("Limit składu: 5–10 zawodników. Transfery zablokowane w fazie pucharowej."))
+        root.addWidget(muted("Limit składu: 10 zawodników. Transfery zablokowane w fazie pucharowej."))
 
         btns = QHBoxLayout()
         btns.addStretch()
