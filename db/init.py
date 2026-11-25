@@ -1,5 +1,6 @@
 import sqlite3
 import pathlib
+import re
 import sys
 import time
 
@@ -40,6 +41,25 @@ def init_db() -> None:
     with get_connection() as conn:
         conn.executescript(schema)
     print(f"Baza zainicjalizowana: {DB_PATH}")
+
+
+def migrate_db() -> None:
+    """Dostosowuje istniejącą bazę do bieżącego schematu, bez utraty danych.
+    Idempotentne — można wołać przy każdym starcie.
+    - goal.own_goal (gole samobójcze): dopisywana kolumna, stare gole = 0,
+      a widok v_scorers jest odtwarzany z schema.sql (żeby pomijał samobóje)."""
+    with get_connection() as conn:
+        cols = {r["name"] for r in conn.execute("PRAGMA table_info(goal)")}
+        if not cols or "own_goal" in cols:
+            return
+        view_sql = re.search(r"CREATE VIEW v_scorers AS.*?;",
+                             SCHEMA_PATH.read_text(encoding="utf-8"), re.S).group(0)
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute("ALTER TABLE goal ADD COLUMN own_goal INTEGER NOT NULL DEFAULT 0 "
+                     "CHECK (own_goal IN (0, 1))")
+        conn.execute("DROP VIEW IF EXISTS v_scorers")
+        conn.execute(view_sql)
+        conn.commit()
 
 
 if __name__ == "__main__":

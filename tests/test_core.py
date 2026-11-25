@@ -482,6 +482,109 @@ class TestMatchDetails(DBTestCase):
         self.assertEqual(len(d["home_scorers"]), 1)
         self.assertEqual(d["away_scorers"], [])
 
+    def test_own_goals_credit_opponent_and_show_author(self):
+        tid, _ = self._make_tournament()
+        draw.draw_groups(tid)
+        schedule.generate_group_schedule(tid)
+        fx = next(f for f in schedule.get_schedule(tid) if f["stage"] == "GROUP")
+        scorer = self._first_player(fx["home_team_id"])
+        away_author = self._first_player(fx["away_team_id"])
+        home_author = self._first_player(fx["home_team_id"])
+        # 2:1 — gospodarze: gol strzelca + samobój gościa; goście: samobój gospodarza
+        match_result.save_match_result(
+            fx["match_id"], 2, 1, [scorer], own_goal_ids=[away_author, home_author])
+
+        d = match_result.get_match_details(fx["match_id"])
+        self.assertEqual((d["home_score"], d["away_score"]), (2, 1))
+        home_own = [s for s in d["home_scorers"] if s["own"]]
+        away_own = [s for s in d["away_scorers"] if s["own"]]
+        self.assertEqual(len(home_own), 1)       # samobój gościa liczy się gospodarzom
+        self.assertEqual(len(away_own), 1)
+        self.assertTrue(home_own[0]["name"].endswith("(sam.)"))
+        self.assertEqual(match_result.get_match_own_goal_counts(fx["match_id"]),
+                         {away_author: 1, home_author: 1})
+        # w klasyfikacji strzelców i w składzie tylko prawdziwy gol
+        self.assertEqual(sum(s["goals"] for s in reports.top_scorers(tid)), 1)
+        self.assertEqual(sum(s["goals"] for s in reports.squad(fx["home_team_id"])), 1)
+
+        match_result.edit_match_result(fx["match_id"], 1, 0, [], own_goal_ids=[away_author])
+        self.assertEqual(match_result.get_match_own_goal_counts(fx["match_id"]), {away_author: 1})
+        self.assertEqual(reports.top_scorers(tid), [])
+
+    def test_own_goals_must_match_score(self):
+        tid, _ = self._make_tournament()
+        draw.draw_groups(tid)
+        schedule.generate_group_schedule(tid)
+        fx = next(f for f in schedule.get_schedule(tid) if f["stage"] == "GROUP")
+        home_p = self._first_player(fx["home_team_id"])
+        with self.assertRaises(ValueError):     # za mało strzelców/samobójów na wynik
+            match_result.save_match_result(fx["match_id"], 2, 0, [home_p])
+        with self.assertRaises(ValueError):     # samobój gospodarza nie daje bramki gospodarzom
+            match_result.save_match_result(fx["match_id"], 1, 0, [], own_goal_ids=[home_p])
+        outsider = self._first_player(next(
+            t for t in team_dao.list_teams(tid)
+            if t["id"] not in (fx["home_team_id"], fx["away_team_id"]))["id"])
+        with self.assertRaises(ValueError):     # autor spoza drużyn meczu
+            match_result.save_match_result(fx["match_id"], 1, 0, [], own_goal_ids=[outsider])
+        self.assertFalse(match_result.get_match(fx["match_id"])["played"])
+
+    def test_migrate_old_database_keeps_data(self):
+        """Baza sprzed samobójów (goal bez own_goal) dostaje kolumnę bez utraty danych."""
+        tid, _ = self._make_tournament()
+        draw.draw_groups(tid)
+        schedule.generate_group_schedule(tid)
+        fx = next(f for f in schedule.get_schedule(tid) if f["stage"] == "GROUP")
+        match_result.save_match_result(fx["match_id"], 1, 0, [self._first_player(fx["home_team_id"])])
+        with get_connection() as c:
+            c.execute("DROP VIEW v_scorers")
+            c.execute("ALTER TABLE goal DROP COLUMN own_goal")
+        dbinit.migrate_db()
+        dbinit.migrate_db()                     # idempotentne
+        with get_connection() as c:
+            self.assertEqual(c.execute("SELECT own_goal FROM goal").fetchone()["own_goal"], 0)
+        self.assertEqual(sum(s["goals"] for s in reports.top_scorers(tid)), 1)
+
+    def test_own_goals_survive_export_import(self):
+        from app.services import backup
+        tid, _ = self._make_tournament()
+        draw.draw_groups(tid)
+        schedule.generate_group_schedule(tid)
+        fx = next(f for f in schedule.get_schedule(tid) if f["stage"] == "GROUP")
+        author = self._first_player(fx["away_team_id"])
+        match_result.save_match_result(fx["match_id"], 1, 0, [], own_goal_ids=[author])
+        new_tid = backup.import_tournament(backup.export_tournament(tid))
+        with get_connection() as c:
+            rows = c.execute(
+                "SELECT g.own_goal FROM goal g JOIN match m ON m.id = g.match_id "
+                "WHERE m.tournament_id = ?", (new_tid,)).fetchall()
+        self.assertEqual([r["own_goal"] for r in rows], [1])
+
+    FRIEND_FILE = (pathlib.Path(__file__).resolve().parents[1] / "exports" / "turnieje"
+                   / "LIGA PIŁKI HALOWEJ O PUCHAR GODZISZOWA.json")
+
+    @unittest.skipUnless(FRIEND_FILE.exists(), "brak pliku turnieju od znajomego w exports/")
+    def test_import_old_format_file_from_friend(self):
+        """Plik sprzed samobójów (bez own_goal) wczytuje się do nowej bazy jako zwykłe gole."""
+        from app.services import backup
+        tid = backup.import_from_file(self.FRIEND_FILE)
+        with get_connection() as c:
+            own = c.execute(
+                "SELECT COUNT(*) AS n FROM goal g JOIN match m ON m.id = g.match_id "
+                "WHERE m.tournament_id = ? AND g.own_goal <> 0", (tid,)).fetchone()["n"]
+            goals = c.execute(
+                "SELECT COUNT(*) AS n FROM goal g JOIN match m ON m.id = g.match_id "
+                "WHERE m.tournament_id = ?", (tid,)).fetchone()["n"]
+            total = c.execute(
+                "SELECT COALESCE(SUM(home_score + away_score), 0) AS n FROM match "
+                "WHERE tournament_id = ? AND played = 1", (tid,)).fetchone()["n"]
+            lso = c.execute(
+                "SELECT COUNT(*) AS n FROM player p JOIN team t ON t.id = p.team_id "
+                "WHERE t.tournament_id = ? AND t.name = 'LSO SANDOMIERZ'", (tid,)).fetchone()["n"]
+        self.assertEqual(own, 0)
+        self.assertEqual(goals, total)          # każda bramka z wyniku ma strzelca
+        self.assertEqual(lso, 0)                # plik od znajomego nie zawiera składu LSO
+        self.assertEqual(sum(s["goals"] for s in reports.top_scorers(tid, limit=500)), goals)
+
     def test_unplayed_and_missing(self):
         tid, _ = self._make_tournament()
         draw.draw_groups(tid)

@@ -39,6 +39,7 @@ C = {
     "text": "#1f2937",
     "muted": "#6b7280",
     "accent": "#1f9d63",
+    "own_goal": "#dc2626",
     "pill_off": "#e5e7eb",
     "line": "#a7d3b9",
 }
@@ -406,16 +407,18 @@ def _match_card(p: QPainter, r: QRectF, d: dict) -> None:
         w = half - 60
         for s in d[side]:
             text = s["name"] + (f"  ×{s['goals']}" if s["goals"] > 1 else "")
-            _ball(p, QPointF(x + w - 6 if align == Qt.AlignRight else x + 6, ly + SCORER_LINE_H / 2))
+            _ball(p, QPointF(x + w - 6 if align == Qt.AlignRight else x + 6, ly + SCORER_LINE_H / 2),
+                  own_goal=s.get("own", False))
             tr = QRectF(x, ly, w - 22, SCORER_LINE_H) if align == Qt.AlignRight \
                 else QRectF(x + 22, ly, w - 22, SCORER_LINE_H)
             _text(p, tr, text, 16, weight=QFont.DemiBold, align=align | Qt.AlignVCenter)
             ly += SCORER_LINE_H
 
 
-def _ball(p: QPainter, c: QPointF) -> None:
+def _ball(p: QPainter, c: QPointF, own_goal: bool = False) -> None:
+    """Kropka przy strzelcu: zielona, a przy golu samobójczym czerwona."""
     p.setPen(Qt.NoPen)
-    p.setBrush(QColor(C["accent"]))
+    p.setBrush(QColor(C["own_goal" if own_goal else "accent"]))
     p.drawEllipse(c, 6, 6)
 
 

@@ -65,6 +65,9 @@ CREATE TABLE goal (
     id         INTEGER PRIMARY KEY,
     match_id   INTEGER NOT NULL,
     scorer_id  INTEGER NOT NULL,
+    -- 1 = gol samobójczy: scorer_id to zawodnik, który go strzelił, ale bramka
+    -- liczy się do wyniku PRZECIWNIKA i nie wchodzi do klasyfikacji strzelców.
+    own_goal   INTEGER NOT NULL DEFAULT 0 CHECK (own_goal IN (0, 1)),
     FOREIGN KEY (match_id)  REFERENCES match(id)  ON DELETE CASCADE,
     FOREIGN KEY (scorer_id) REFERENCES player(id) ON DELETE CASCADE
 );
@@ -251,6 +254,7 @@ SELECT m.tournament_id,
   JOIN match  m ON m.id = g.match_id
   JOIN player p ON p.id = g.scorer_id
   JOIN team   t ON t.id = p.team_id
+ WHERE g.own_goal = 0
  GROUP BY m.tournament_id, p.id, p.name, t.id, t.name;
 
 -- Wynik serii rzutów karnych (tylko mecze z zapisaną serią).

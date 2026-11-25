@@ -121,7 +121,7 @@ def squad(team_id: int) -> list[dict]:
             """SELECT p.name AS player_name,
                       COUNT(g.id) AS goals
                FROM player p
-               LEFT JOIN goal g ON g.scorer_id = p.id
+               LEFT JOIN goal g ON g.scorer_id = p.id AND g.own_goal = 0
                WHERE p.team_id = ?
                GROUP BY p.id, p.name
                ORDER BY goals DESC, p.name""",

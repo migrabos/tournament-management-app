@@ -11,14 +11,42 @@ SF_DEPENDENTS = {
 }
 
 
-def _validate_scorers(home_score: int, away_score: int, scorer_ids: list[int]) -> None:
-    """Sprawdza, czy liczba strzelców zgadza się z wynikiem."""
+def _validate_scorers(home_score: int, away_score: int, scorer_ids: list[int],
+                      own_goal_ids: list[int] = ()) -> None:
+    """Sprawdza, czy strzelcy + gole samobójcze zgadzają się z wynikiem.
+    own_goal_ids: zawodnicy, którzy strzelili samobója (bramka idzie ich przeciwnikowi)."""
     expected = home_score + away_score
-    if len(scorer_ids) != expected:
+    if len(scorer_ids) + len(own_goal_ids) != expected:
         raise ValueError(
-            f"Liczba strzelców ({len(scorer_ids)}) nie zgadza się "
-            f"z wynikiem ({home_score} + {away_score} = {expected})."
+            f"Liczba strzelców ({len(scorer_ids)}) i goli samobójczych ({len(own_goal_ids)}) "
+            f"nie zgadza się z wynikiem ({home_score} + {away_score} = {expected})."
         )
+
+
+def _validate_own_goal_sides(conn, match, home_score: int, away_score: int,
+                             scorer_ids: list[int], own_goal_ids: list[int]) -> None:
+    """Gdy są samobóje: gole strzelców drużyny + samobóje jej przeciwników
+    muszą dawać dokładnie wynik tej drużyny."""
+    if not own_goal_ids:
+        return
+    home_id, away_id = match["home_team_id"], match["away_team_id"]
+    team_of = {r["id"]: r["team_id"] for r in conn.execute(
+        "SELECT id, team_id FROM player WHERE team_id IN (?, ?)", (home_id, away_id))}
+    if any(pid not in team_of for pid in own_goal_ids):
+        raise ValueError("Autor samobója nie należy do żadnej z drużyn tego meczu.")
+    home = (sum(team_of.get(p) == home_id for p in scorer_ids)
+            + sum(team_of[p] == away_id for p in own_goal_ids))
+    away = (sum(team_of.get(p) == away_id for p in scorer_ids)
+            + sum(team_of[p] == home_id for p in own_goal_ids))
+    if (home, away) != (home_score, away_score):
+        raise ValueError("Strzelcy i gole samobójcze nie zgadzają się z wynikiem drużyn.")
+
+
+def _insert_goals(conn, match_id: int, scorer_ids: list[int], own_goal_ids: list[int]) -> None:
+    conn.executemany(
+        "INSERT INTO goal (match_id, scorer_id, own_goal) VALUES (?, ?, ?)",
+        [(match_id, pid, 0) for pid in scorer_ids] + [(match_id, pid, 1) for pid in own_goal_ids]
+    )
 
 
 def _resolve_shootout(conn, match, home_score: int, away_score: int,
@@ -78,9 +106,12 @@ def save_match_result(
     scorer_ids: list[int],
     winner_pen: int | None = None,
     shootout: list[tuple[int, bool]] | None = None,
+    own_goal_ids: list[int] | None = None,
 ) -> None:
     """
     Atomowo zapisuje wynik meczu i listę strzelców.
+    own_goal_ids: zawodnicy, którzy strzelili gola samobójczego (po jednym id na gola);
+    bramka liczy się ich przeciwnikowi i nie wchodzi do klasyfikacji strzelców.
     winner_pen: 0 = home wygrał karne, 1 = away wygrał karne, None = bez karnych.
     shootout: opcjonalny przebieg serii [(player_id, scored), ...] — nie liczy się
     do klasyfikacji strzelców; jeśli podany, z niego wynika winner_pen.
@@ -89,7 +120,7 @@ def save_match_result(
     Retry przy sqlite3.OperationalError (database is locked).
     """
     with_retry(_do_save_match_result, match_id, home_score, away_score,
-               scorer_ids, winner_pen, shootout or [])
+               scorer_ids, winner_pen, shootout or [], list(own_goal_ids or []))
 
 
 def _do_save_match_result(
@@ -99,8 +130,9 @@ def _do_save_match_result(
     scorer_ids: list[int],
     winner_pen: int | None,
     shootout: list,
+    own_goal_ids: list[int],
 ) -> None:
-    _validate_scorers(home_score, away_score, scorer_ids)
+    _validate_scorers(home_score, away_score, scorer_ids, own_goal_ids)
 
     conn = get_connection()
     tournament_id = None
@@ -119,6 +151,7 @@ def _do_save_match_result(
 
         tournament_id = match["tournament_id"]
         stage = match["stage"]
+        _validate_own_goal_sides(conn, match, home_score, away_score, scorer_ids, own_goal_ids)
         winner_pen = _resolve_shootout(conn, match, home_score, away_score,
                                        winner_pen, shootout)
 
@@ -129,11 +162,7 @@ def _do_save_match_result(
             (home_score, away_score, winner_pen, match_id)
         )
 
-        for scorer_id in scorer_ids:
-            conn.execute(
-                "INSERT INTO goal (match_id, scorer_id) VALUES (?, ?)",
-                (match_id, scorer_id)
-            )
+        _insert_goals(conn, match_id, scorer_ids, own_goal_ids)
         _insert_shootout(conn, match_id, shootout)
 
         conn.commit()
@@ -259,14 +288,15 @@ def edit_match_result(
     scorer_ids: list[int],
     winner_pen: int | None = None,
     shootout: list[tuple[int, bool]] | None = None,
+    own_goal_ids: list[int] | None = None,
 ) -> None:
-    """Edytuje wynik już rozegranego meczu (transakcja).
+    """Edytuje wynik już rozegranego meczu (transakcja). own_goal_ids jak w save_match_result.
     Usuwa poprzednich strzelców i serię karnych, zapisuje nowy wynik i nowych strzelców.
     Dla półfinału KO ponownie propaguje zwycięzcę/przegranego do meczów zależnych.
     Retry przy sqlite3.OperationalError (database is locked).
     """
     with_retry(_do_edit_match_result, match_id, home_score, away_score,
-               scorer_ids, winner_pen, shootout or [])
+               scorer_ids, winner_pen, shootout or [], list(own_goal_ids or []))
 
 
 def _do_edit_match_result(
@@ -276,8 +306,9 @@ def _do_edit_match_result(
     scorer_ids: list[int],
     winner_pen: int | None,
     shootout: list,
+    own_goal_ids: list[int],
 ) -> None:
-    _validate_scorers(home_score, away_score, scorer_ids)
+    _validate_scorers(home_score, away_score, scorer_ids, own_goal_ids)
 
     editable, reason = can_edit_match(match_id)
     if not editable:
@@ -296,6 +327,7 @@ def _do_edit_match_result(
         tournament_id = match["tournament_id"]
         stage = match["stage"]
 
+        _validate_own_goal_sides(conn, match, home_score, away_score, scorer_ids, own_goal_ids)
         winner_pen = _resolve_shootout(conn, match, home_score, away_score,
                                        winner_pen, shootout)
 
@@ -307,11 +339,7 @@ def _do_edit_match_result(
                WHERE id = ?""",
             (home_score, away_score, winner_pen, match_id)
         )
-        for scorer_id in scorer_ids:
-            conn.execute(
-                "INSERT INTO goal (match_id, scorer_id) VALUES (?, ?)",
-                (match_id, scorer_id)
-            )
+        _insert_goals(conn, match_id, scorer_ids, own_goal_ids)
         _insert_shootout(conn, match_id, shootout)
 
         conn.commit()
@@ -344,7 +372,7 @@ def get_match_goals(match_id: int) -> list[dict]:
     """Zwraca listę strzelców dla danego meczu."""
     with get_connection() as conn:
         rows = conn.execute(
-            """SELECT g.id, p.name as scorer_name, t.name as team_name
+            """SELECT g.id, p.name as scorer_name, t.name as team_name, g.own_goal
                FROM goal g
                JOIN player p ON p.id = g.scorer_id
                JOIN team   t ON t.id = p.team_id
@@ -355,19 +383,32 @@ def get_match_goals(match_id: int) -> list[dict]:
 
 
 def get_match_scorer_counts(match_id: int) -> dict[int, int]:
-    """Zwraca słownik {scorer_id: liczba_bramek} dla danego meczu."""
+    """Zwraca słownik {scorer_id: liczba_bramek} dla danego meczu (bez samobójów)."""
+    return _goal_counts(match_id, own_goal=0)
+
+
+def get_match_own_goal_counts(match_id: int) -> dict[int, int]:
+    """Zwraca słownik {player_id: liczba_goli_samobójczych} dla danego meczu."""
+    return _goal_counts(match_id, own_goal=1)
+
+
+def _goal_counts(match_id: int, own_goal: int) -> dict[int, int]:
     with get_connection() as conn:
         rows = conn.execute(
-            "SELECT scorer_id, COUNT(*) AS n FROM goal WHERE match_id = ? GROUP BY scorer_id",
-            (match_id,)
+            """SELECT scorer_id, COUNT(*) AS n FROM goal
+               WHERE match_id = ? AND own_goal = ? GROUP BY scorer_id""",
+            (match_id, own_goal)
         ).fetchall()
     return {row["scorer_id"]: row["n"] for row in rows}
+
 
 def get_match_details(match_id: int) -> dict | None:
     """
     Szczegóły meczu do wyświetlenia: drużyny, wynik, karne i strzelcy
-    rozdzieleni na gospodarzy i gości ({"name", "goals"}, posortowani malejąco),
+    rozdzieleni na gospodarzy i gości ({"name", "goals", "own"}, posortowani malejąco),
     oraz seria karnych ("shootout", "home_pens", "away_pens").
+    Gol samobójczy ("own": True, nazwa z dopiskiem „(sam.)”) trafia na stronę
+    drużyny, której bramkę zaliczono — czyli przeciwnej do autora.
 
     Strona strzelca: jego obecna drużyna, a jeśli od tamtej pory przeszedł
     transferem gdzie indziej — drużyna meczu, z której odszedł.
@@ -384,14 +425,14 @@ def get_match_details(match_id: int) -> dict | None:
         if m is None:
             return None
         rows = conn.execute(
-            """SELECT p.id, p.name, p.team_id, COUNT(*) AS goals,
+            """SELECT p.id, p.name, p.team_id, g.own_goal, COUNT(*) AS goals,
                       (SELECT tr.from_team_id FROM transfer tr
                         WHERE tr.player_id = p.id AND tr.from_team_id IN (?, ?)
                         ORDER BY tr.id LIMIT 1) AS former_team_id
                FROM goal g JOIN player p ON p.id = g.scorer_id
                WHERE g.match_id = ?
-               GROUP BY p.id
-               ORDER BY goals DESC, p.name""",
+               GROUP BY p.id, g.own_goal
+               ORDER BY g.own_goal, goals DESC, p.name""",
             (m["home_team_id"], m["away_team_id"], match_id)
         ).fetchall()
         kicks = conn.execute(
@@ -406,8 +447,12 @@ def get_match_details(match_id: int) -> dict | None:
     for r in rows:
         team = r["team_id"] if r["team_id"] in (m["home_team_id"], m["away_team_id"]) \
             else r["former_team_id"]
-        side = "home_scorers" if team == m["home_team_id"] else "away_scorers"
-        details[side].append({"name": r["name"], "goals": r["goals"]})
+        own = bool(r["own_goal"])
+        is_home_player = team == m["home_team_id"]
+        # samobój liczy się przeciwnikowi autora
+        side = "home_scorers" if is_home_player != own else "away_scorers"
+        name = r["name"] + (" (sam.)" if own else "")
+        details[side].append({"name": name, "goals": r["goals"], "own": own})
 
     # Seria karnych: transfery są zablokowane od startu KO, więc obecna
     # drużyna wykonawcy to drużyna z meczu.

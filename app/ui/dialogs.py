@@ -19,7 +19,7 @@ class ResultDialog(QDialog):
         self.match_id = match_id
         self.edit = edit
         self.setWindowTitle("Edycja wyniku meczu" if edit else "Wynik meczu")
-        self.setMinimumWidth(520)
+        self.setMinimumWidth(760)
 
         self.match = match_result.get_match(match_id)
         self.home = team_dao.get_team(self.match["home_team_id"])
@@ -27,6 +27,7 @@ class ResultDialog(QDialog):
         self.home_players = player_dao.list_players(self.match["home_team_id"])
         self.away_players = player_dao.list_players(self.match["away_team_id"])
         self.existing = match_result.get_match_scorer_counts(match_id) if edit else {}
+        self.existing_own = match_result.get_match_own_goal_counts(match_id) if edit else {}
         self.is_ko = self.match["stage"] != "GROUP"
         self.existing_shootout = match_result.get_match_shootout(match_id) if edit else []
 
@@ -40,12 +41,14 @@ class ResultDialog(QDialog):
         title = h2(f"{self.home['name']}  –  {self.away['name']}")
         title.setAlignment(Qt.AlignCenter)
         root.addWidget(title)
-        root.addWidget(muted("Ustaw liczbę bramek dla każdego zawodnika."), alignment=Qt.AlignCenter)
+        root.addWidget(muted("Ustaw liczbę bramek dla każdego zawodnika. "
+                             "Gol samobójczy wpisz jego autorowi — zalicza się przeciwnikowi."),
+                       alignment=Qt.AlignCenter)
 
         cols = QHBoxLayout()
         cols.setSpacing(14)
-        self.home_spins = self._team_card(cols, self.home, self.home_players)
-        self.away_spins = self._team_card(cols, self.away, self.away_players)
+        self.home_spins, self.home_own = self._team_card(cols, self.home, self.home_players)
+        self.away_spins, self.away_own = self._team_card(cols, self.away, self.away_players)
         root.addLayout(cols)
 
         btns = QHBoxLayout()
@@ -58,31 +61,51 @@ class ResultDialog(QDialog):
         btns.addWidget(save)
         root.addLayout(btns)
 
-    def _team_card(self, parent_layout, team, players) -> dict:
+    def _team_card(self, parent_layout, team, players):
+        """Karta drużyny: dla każdego zawodnika licznik bramek i goli samobójczych
+        (samobój liczy się przeciwnikowi). Zwraca (spins, own_spins) wg id zawodnika."""
         frame, lay = card(padding=14)
         lbl = QLabel(team["name"])
         lbl.setObjectName("groupTitle")
         lay.addWidget(lbl)
-        spins = {}
+        spins, own_spins = {}, {}
         if not players:
             lay.addWidget(muted("(brak zawodników)"))
+        else:
+            head = QHBoxLayout()
+            head.addStretch()
+            for text in ("bramki", "samobóje"):
+                col = muted(text)
+                col.setFixedWidth(102)
+                col.setAlignment(Qt.AlignCenter)
+                head.addWidget(col)
+            lay.addLayout(head)
         for p in players:
             row = QHBoxLayout()
             name = QLabel(p["name"])
             row.addWidget(name)
             row.addStretch()
             spin = Stepper(value=self.existing.get(p["id"], 0), minimum=0, maximum=20)
+            own = Stepper(value=self.existing_own.get(p["id"], 0), minimum=0, maximum=20)
             row.addWidget(spin)
+            row.addWidget(own)
             spins[p["id"]] = spin
+            own_spins[p["id"]] = own
             lay.addLayout(row)
         parent_layout.addWidget(frame)
-        return spins
+        return spins, own_spins
 
     def _save(self):
         home_goals = {pid: s.value() for pid, s in self.home_spins.items()}
         away_goals = {pid: s.value() for pid, s in self.away_spins.items()}
-        home_score = sum(home_goals.values())
-        away_score = sum(away_goals.values())
+        home_own = {pid: s.value() for pid, s in self.home_own.items()}
+        away_own = {pid: s.value() for pid, s in self.away_own.items()}
+        # samobój zawodnika jednej drużyny to bramka drugiej
+        home_score = sum(home_goals.values()) + sum(away_own.values())
+        away_score = sum(away_goals.values()) + sum(home_own.values())
+        own_goals = []
+        for pid, n in {**home_own, **away_own}.items():
+            own_goals.extend([pid] * n)
 
         winner_pen = None
         shootout = []
@@ -102,10 +125,10 @@ class ResultDialog(QDialog):
         try:
             if self.edit:
                 match_result.edit_match_result(self.match_id, home_score, away_score, scorers,
-                                               winner_pen, shootout)
+                                               winner_pen, shootout, own_goals)
             else:
                 match_result.save_match_result(self.match_id, home_score, away_score, scorers,
-                                               winner_pen, shootout)
+                                               winner_pen, shootout, own_goals)
         except Exception as e:
             QMessageBox.critical(self, "Błąd zapisu", str(e))
             return

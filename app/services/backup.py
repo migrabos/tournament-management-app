@@ -77,7 +77,7 @@ def export_tournament(tournament_id: int) -> dict:
                           home_score, away_score, winner_pen, played, scheduled_at
                    FROM match WHERE tournament_id = ? ORDER BY id"""),
             "goals": rows(
-                """SELECT g.match_id, g.scorer_id FROM goal g
+                """SELECT g.match_id, g.scorer_id, g.own_goal FROM goal g
                    JOIN match m ON m.id = g.match_id
                    WHERE m.tournament_id = ? ORDER BY g.id"""),
             "penalty_kicks": rows(
@@ -231,8 +231,10 @@ def _do_import(data: dict) -> int:
         if trigger_sql:
             conn.execute("DROP TRIGGER trg_goal_scorer_valid")
         conn.executemany(
-            "INSERT INTO goal (match_id, scorer_id) VALUES (?, ?)",
-            [(match_map[g["match_id"]], player_map[g["scorer_id"]]) for g in data["goals"]]
+            "INSERT INTO goal (match_id, scorer_id, own_goal) VALUES (?, ?, ?)",
+            # brak own_goal = plik sprzed wprowadzenia goli samobójczych
+            [(match_map[g["match_id"]], player_map[g["scorer_id"]], int(bool(g.get("own_goal"))))
+             for g in data["goals"]]
         )
         if trigger_sql:
             conn.execute(trigger_sql["sql"])
