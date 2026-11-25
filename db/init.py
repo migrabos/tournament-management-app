@@ -48,6 +48,7 @@ def migrate_db() -> None:
     Idempotentne — można wołać przy każdym starcie.
     - goal.own_goal (gole samobójcze): dopisywana kolumna, stare gole = 0,
       a widok v_scorers jest odtwarzany z schema.sql (żeby pomijał samobóje).
+    - player.active (wyłączanie zawodnika z gry): dopisywana kolumna, wszyscy = 1,
     - triggery trg_transfer_min_squad i trg_player_squad_limit (minimum i limit
       składu) są usuwane."""
     with get_connection() as conn:
@@ -61,6 +62,11 @@ def migrate_db() -> None:
             conn.execute("DROP VIEW IF EXISTS v_scorers")
             conn.execute(view_sql)
             conn.commit()
+
+        player_cols = {r["name"] for r in conn.execute("PRAGMA table_info(player)")}
+        if player_cols and "active" not in player_cols:
+            conn.execute("ALTER TABLE player ADD COLUMN active INTEGER NOT NULL DEFAULT 1 "
+                         "CHECK (active IN (0, 1))")
 
         conn.execute("DROP TRIGGER IF EXISTS trg_transfer_min_squad")
         conn.execute("DROP TRIGGER IF EXISTS trg_player_squad_limit")

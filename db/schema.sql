@@ -24,6 +24,9 @@ CREATE TABLE player (
     id       INTEGER PRIMARY KEY,
     team_id  INTEGER NOT NULL,
     name     TEXT    NOT NULL,
+    -- 0 = wyłączony z gry (np. zastępca, który odszedł): znika z wyboru w oknie
+    -- wyniku, ale jego gole i historia zostają.
+    active   INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
     FOREIGN KEY (team_id) REFERENCES team(id) ON DELETE CASCADE
 );
 

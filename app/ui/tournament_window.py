@@ -10,7 +10,7 @@ import sys
 import threading
 
 from PySide6.QtCore import Qt, QUrl
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtGui import QDesktopServices, QBrush, QColor
 
 from app.dao import tournament_dao, team_dao, player_dao
 from app.services import draw, schedule, match_result, reset, backup
@@ -161,9 +161,14 @@ class TournamentPage(QWidget):
         pb = QHBoxLayout()
         p_add = primary_button("Dodaj zawodnika")
         p_add.clicked.connect(self._add_player)
+        p_toggle = button("Wyłącz / włącz")
+        p_toggle.setToolTip("Wyłączony zawodnik znika z wyboru w oknie wyniku, "
+                            "ale jego gole i historia zostają. Działa w każdej fazie turnieju.")
+        p_toggle.clicked.connect(self._toggle_player)
         p_del = button("Usuń", danger=True)
         p_del.clicked.connect(self._delete_player)
         pb.addWidget(p_add)
+        pb.addWidget(p_toggle)
         pb.addWidget(p_del)
         pb.addStretch()
         rl.addLayout(pb)
@@ -198,7 +203,23 @@ class TournamentPage(QWidget):
         for p in player_dao.list_players(tid):
             r = self.players_table.rowCount()
             self.players_table.insertRow(r)
-            self.players_table.setItem(r, 0, self._item(p["name"], uid=p["id"]))
+            if p["active"]:
+                item = self._item(p["name"], uid=p["id"])
+            else:
+                item = self._item(f"{p['name']}  (nieaktywny)", uid=p["id"])
+                item.setForeground(QBrush(QColor("#9ca3af")))
+            self.players_table.setItem(r, 0, item)
+
+    def _toggle_player(self):
+        row = self.players_table.currentRow()
+        if row < 0:
+            QMessageBox.information(self, "Info", "Wybierz najpierw zawodnika.")
+            return
+        player_id = self.players_table.item(row, 0).data(UID)
+        player = player_dao.get_player(player_id)
+        player_dao.set_active(player_id, not player["active"])
+        self._refresh_players()
+        self.players_table.selectRow(row)
 
     def _add_team(self):
         if self._state() != "SETUP":

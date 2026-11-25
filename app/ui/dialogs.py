@@ -24,14 +24,23 @@ class ResultDialog(QDialog):
         self.match = match_result.get_match(match_id)
         self.home = team_dao.get_team(self.match["home_team_id"])
         self.away = team_dao.get_team(self.match["away_team_id"])
-        self.home_players = player_dao.list_players(self.match["home_team_id"])
-        self.away_players = player_dao.list_players(self.match["away_team_id"])
         self.existing = match_result.get_match_scorer_counts(match_id) if edit else {}
         self.existing_own = match_result.get_match_own_goal_counts(match_id) if edit else {}
         self.is_ko = self.match["stage"] != "GROUP"
         self.existing_shootout = match_result.get_match_shootout(match_id) if edit else []
+        # Tylko aktywni zawodnicy; przy edycji także wyłączeni, którzy w tym meczu
+        # mają gola, samobója albo karnego — inaczej zapis by ich zgubił.
+        involved = set(self.existing) | set(self.existing_own) | {
+            pid for pid, _ in self.existing_shootout}
+        self.home_players = self._match_players(self.match["home_team_id"], involved)
+        self.away_players = self._match_players(self.match["away_team_id"], involved)
 
         self._build()
+
+    @staticmethod
+    def _match_players(team_id: int, involved: set) -> list[dict]:
+        return [p for p in player_dao.list_players(team_id)
+                if p["active"] or p["id"] in involved]
 
     def _build(self):
         root = QVBoxLayout(self)

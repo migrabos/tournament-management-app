@@ -69,7 +69,7 @@ def export_tournament(tournament_id: int) -> dict:
             "teams": rows(
                 "SELECT id, name, group_name FROM team WHERE tournament_id = ? ORDER BY id"),
             "players": rows(
-                """SELECT p.id, p.team_id, p.name FROM player p
+                """SELECT p.id, p.team_id, p.name, p.active FROM player p
                    JOIN team t ON t.id = p.team_id
                    WHERE t.tournament_id = ? ORDER BY p.id"""),
             "matches": rows(
@@ -203,8 +203,9 @@ def _do_import(data: dict) -> int:
         player_map = {}
         for p in data["players"]:
             player_map[p["id"]] = conn.execute(
-                "INSERT INTO player (team_id, name) VALUES (?, ?)",
-                (team_map[p["team_id"]], p["name"])
+                "INSERT INTO player (team_id, name, active) VALUES (?, ?, ?)",
+                # brak active = plik sprzed wyłączania zawodników (wszyscy aktywni)
+                (team_map[p["team_id"]], p["name"], int(bool(p.get("active", 1))))
             ).lastrowid
 
         match_map = {}

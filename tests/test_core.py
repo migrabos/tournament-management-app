@@ -181,6 +181,60 @@ class TestReports(DBTestCase):
         self.assertEqual(sum(s["goals"] for s in scorers), 30)
 
 
+class TestPlayerActive(DBTestCase):
+    def test_everyone_active_by_default_and_toggle_keeps_goals(self):
+        tid, teams = self._make_tournament()
+        draw.draw_groups(tid)
+        schedule.generate_group_schedule(tid)
+        self.assertTrue(all(p["active"] for p in player_dao.list_players(teams[0])))
+
+        fx = next(f for f in schedule.get_schedule(tid) if f["stage"] == "GROUP")
+        scorer = self._first_player(fx["home_team_id"])
+        match_result.save_match_result(fx["match_id"], 1, 0, [scorer])
+
+        player_dao.set_active(scorer, False)        # w trakcie turnieju — wolno
+        active = {p["id"] for p in player_dao.list_players(fx["home_team_id"], only_active=True)}
+        self.assertNotIn(scorer, active)
+        self.assertEqual(len(player_dao.list_players(fx["home_team_id"])), 6)   # nadal w składzie
+        # gol zostaje w klasyfikacji i w szczegółach meczu
+        self.assertEqual(sum(s["goals"] for s in reports.top_scorers(tid)), 1)
+        self.assertEqual(len(match_result.get_match_details(fx["match_id"])["home_scorers"]), 1)
+
+        player_dao.set_active(scorer, True)
+        self.assertIn(scorer, {p["id"] for p in
+                               player_dao.list_players(fx["home_team_id"], only_active=True)})
+
+    def test_active_survives_export_import_and_old_file_means_active(self):
+        from app.services import backup
+        tid, teams = self._make_tournament(n_teams=2, players_per_team=3)
+        off = self._first_player(teams[0])
+        player_dao.set_active(off, False)
+        data = backup.export_tournament(tid)
+        new_tid = backup.import_tournament(data)
+        with get_connection() as c:
+            inactive = c.execute(
+                "SELECT COUNT(*) AS n FROM player p JOIN team t ON t.id = p.team_id "
+                "WHERE t.tournament_id = ? AND p.active = 0", (new_tid,)).fetchone()["n"]
+        self.assertEqual(inactive, 1)
+
+        for p in data["players"]:
+            p.pop("active")                          # plik sprzed wyłączania zawodników
+        old_tid = backup.import_tournament(data)
+        with get_connection() as c:
+            inactive = c.execute(
+                "SELECT COUNT(*) AS n FROM player p JOIN team t ON t.id = p.team_id "
+                "WHERE t.tournament_id = ? AND p.active = 0", (old_tid,)).fetchone()["n"]
+        self.assertEqual(inactive, 0)
+
+    def test_migrate_adds_active_column(self):
+        tid, teams = self._make_tournament(n_teams=2, players_per_team=3)
+        with get_connection() as c:
+            c.execute("ALTER TABLE player DROP COLUMN active")
+        dbinit.migrate_db()
+        dbinit.migrate_db()                          # idempotentne
+        self.assertTrue(all(p["active"] for p in player_dao.list_players(teams[0])))
+
+
 if __name__ == "__main__":
     unittest.main()
 

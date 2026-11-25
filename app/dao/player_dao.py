@@ -40,12 +40,21 @@ def get_player(player_id: int) -> dict | None:
     return dict(row) if row else None
 
 
-def list_players(team_id: int) -> list[dict]:
+def list_players(team_id: int, only_active: bool = False) -> list[dict]:
+    """Skład drużyny; only_active=True pomija zawodników wyłączonych z gry."""
     with get_connection() as conn:
         rows = conn.execute(
-            "SELECT * FROM player WHERE team_id = ? ORDER BY name", (team_id,)
+            "SELECT * FROM player WHERE team_id = ?" + (" AND active = 1" if only_active else "")
+            + " ORDER BY name", (team_id,)
         ).fetchall()
     return [dict(r) for r in rows]
+
+
+def set_active(player_id: int, active: bool) -> None:
+    """Włącza/wyłącza zawodnika w grze — w każdej fazie turnieju. Nic nie kasuje:
+    gole, karne i historia wyłączonego zawodnika zostają."""
+    with get_connection() as conn:
+        conn.execute("UPDATE player SET active = ? WHERE id = ?", (int(bool(active)), player_id))
 
 
 def count_players(team_id: int) -> int:
