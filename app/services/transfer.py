@@ -1,8 +1,6 @@
 import sqlite3
 from db.init import get_connection, with_retry
 
-MAX_SQUAD = 10
-
 
 def transfer_player(player_id: int, to_team_id: int) -> None:
     """
@@ -42,14 +40,6 @@ def _do_transfer(player_id: int, to_team_id: int) -> None:
             raise ValueError(f"Drużyna {to_team_id} nie istnieje.")
         if to_team["tournament_id"] != tournament_id:
             raise ValueError("Drużyny muszą być w tym samym turnieju.")
-
-        # Sprawdź limit składu drużyny docelowej
-        squad_size = conn.execute(
-            "SELECT COUNT(*) as cnt FROM player WHERE team_id = ?", (to_team_id,)
-        ).fetchone()["cnt"]
-
-        if squad_size >= MAX_SQUAD:
-            raise ValueError(f"Drużyna docelowa ma już {MAX_SQUAD} zawodników (limit składu).")
 
         # Kluczowy warunek: WHERE team_id=from_team_id zabezpiecza przed wyścigiem.
         # Jeśli inny wątek zdążył przenieść zawodnika wcześniej, UPDATE zmieni 0 wierszy.

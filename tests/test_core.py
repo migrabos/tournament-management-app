@@ -87,14 +87,12 @@ class TestCrudAndCascade(DBTestCase):
 
 
 class TestIntegrityTriggers(DBTestCase):
-    def test_squad_limit_max_10(self):
+    def test_no_squad_limit(self):
         tid = tournament_dao.create_tournament("Cup")
         team_id = team_dao.add_team(tid, "Drużyna")
-        for i in range(10):
+        for i in range(15):
             player_dao.add_player(team_id, f"Zawodnik {i}")
-        # 11. zawodnik — trigger trg_player_squad_limit musi zablokować
-        with self.assertRaises(Exception):
-            player_dao.add_player(team_id, "Zawodnik 11")
+        self.assertEqual(player_dao.count_players(team_id), 15)
 
     def test_transfer_blocked_after_knockout(self):
         tid, teams = self._make_tournament()
@@ -131,45 +129,36 @@ class TestTransactionalFlow(DBTestCase):
 
 
 class TestConcurrency(DBTestCase):
-    def test_two_users_compete_for_last_squad_slot(self):
-        """Flagowy test: dwóch użytkowników jednocześnie transferuje zawodnika
-        do drużyny, w której został JEDEN wolny slot (limit składu = 10).
-        Dokładnie jeden transfer może się udać."""
+    def test_two_users_transfer_same_player(self):
+        """Flagowy test: dwóch użytkowników jednocześnie przenosi TEGO SAMEGO
+        zawodnika do tej samej drużyny. Dokładnie jeden transfer może się udać,
+        a w historii ma być dokładnie jeden wpis."""
         tid = tournament_dao.create_tournament("Concurrency")
         target = team_dao.add_team(tid, "Docelowa")
-        src_a = team_dao.add_team(tid, "Źródło A")
-        src_b = team_dao.add_team(tid, "Źródło B")
-
-        # drużyna docelowa: 9 zawodników -> 1 wolny slot
-        for i in range(9):
-            player_dao.add_player(target, f"D {i}")
-        # źródła: po 6 (mogą oddać jednego, zostają z 5 = minimum)
+        source = team_dao.add_team(tid, "Źródło")
         for i in range(6):
-            player_dao.add_player(src_a, f"A {i}")
-            player_dao.add_player(src_b, f"B {i}")
-
-        player_a = self._first_player(src_a)
-        player_b = self._first_player(src_b)
+            player_dao.add_player(target, f"D {i}")
+            player_dao.add_player(source, f"S {i}")
+        player = self._first_player(source)
 
         results = {}
 
-        def worker(name, player_id):
+        def worker(name):
             try:
-                transfer.transfer_player(player_id, target)
+                transfer.transfer_player(player, target)
                 results[name] = "ok"
             except Exception as e:
                 results[name] = ("err", str(e))
 
-        t1 = threading.Thread(target=worker, args=("A", player_a))
-        t2 = threading.Thread(target=worker, args=("B", player_b))
+        t1 = threading.Thread(target=worker, args=("A",))
+        t2 = threading.Thread(target=worker, args=("B",))
         t1.start(); t2.start()
         t1.join(); t2.join()
 
         # dokładnie jeden się udał, jeden odrzucony
         ok = [k for k, v in results.items() if v == "ok"]
         self.assertEqual(len(ok), 1, f"Powinien wygrać dokładnie jeden: {results}")
-        # drużyna docelowa ma dokładnie 10 (slot zajęty raz)
-        self.assertEqual(player_dao.count_players(target), 10)
+        self.assertEqual(player_dao.count_players(target), 7)
         # zalogowano dokładnie jeden transfer
         self.assertEqual(len(reports.transfer_history(tid)), 1)
 
@@ -543,6 +532,31 @@ class TestMatchDetails(DBTestCase):
         with get_connection() as c:
             self.assertEqual(c.execute("SELECT own_goal FROM goal").fetchone()["own_goal"], 0)
         self.assertEqual(sum(s["goals"] for s in reports.top_scorers(tid)), 1)
+
+    def test_migrate_drops_squad_size_triggers(self):
+        """Stara baza z triggerami minimum i limitu składu traci je przy migracji."""
+        with get_connection() as c:
+            c.execute("""CREATE TRIGGER trg_transfer_min_squad
+                         BEFORE UPDATE OF team_id ON player
+                         FOR EACH ROW WHEN OLD.team_id <> NEW.team_id
+                         BEGIN SELECT RAISE(ABORT, 'min'); END""")
+            c.execute("""CREATE TRIGGER trg_player_squad_limit
+                         BEFORE INSERT ON player
+                         FOR EACH ROW WHEN 1
+                         BEGIN SELECT RAISE(ABORT, 'limit'); END""")
+        dbinit.migrate_db()
+        with get_connection() as c:
+            found = c.execute(
+                "SELECT 1 FROM sqlite_master WHERE name IN "
+                "('trg_transfer_min_squad', 'trg_player_squad_limit')").fetchone()
+        self.assertIsNone(found)
+
+    def test_transfer_below_five_allowed(self):
+        tid, teams = self._make_tournament(players_per_team=5)
+        draw.draw_groups(tid)
+        player = self._first_player(teams[0])
+        transfer.transfer_player(player, teams[1])      # drużyna źródłowa spada do 4
+        self.assertEqual(player_dao.count_players(teams[0]), 4)
 
     def test_own_goals_survive_export_import(self):
         from app.services import backup

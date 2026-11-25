@@ -7,7 +7,7 @@ końcową klasyfikację miejsc 1–12.
 
 **Najważniejsze funkcje:**
 
-- drużyny i zawodnicy (składy 5–10 osób), transfery z historią do startu fazy pucharowej;
+- drużyny i zawodnicy (bez limitu składu), transfery z historią do startu fazy pucharowej;
 - losowanie grup i terminarz z naprzemiennym przydziałem gospodarza (najwyżej dwa mecze
   z rzędu u siebie lub na wyjeździe);
 - termin (data i godzina) każdego meczu ustawiany z kalendarza;
@@ -166,10 +166,8 @@ niezależnie od tego, która część kodu modyfikuje dane:
 
 | Trigger | Moment | Reguła |
 |---|---|---|
-| `trg_player_squad_limit` | BEFORE INSERT player | Limit składu: maks. 10 zawodników w drużynie. |
 | `trg_transfer_audit` | AFTER UPDATE player.team_id | Automatyczny wpis do dziennika `transfer`. |
 | `trg_transfer_window` | BEFORE UPDATE player.team_id | Blokada transferów po starcie fazy KO. |
-| `trg_transfer_min_squad` | BEFORE UPDATE player.team_id | Drużyna źródłowa nie może spaść poniżej 5 zawodników. |
 | `trg_goal_scorer_valid` | BEFORE INSERT goal | Strzelec musi grać w jednej z drużyn meczu. |
 | `trg_penalty_kick_valid` | BEFORE INSERT penalty_kick | Strzał tylko w meczu rozstrzygniętym karnymi; wykonawca z jednej z drużyn meczu. |
 | `trg_match_teams_same_tournament_*` | BEFORE INSERT/UPDATE match | Obie drużyny meczu muszą należeć do tego samego turnieju. |
@@ -252,9 +250,9 @@ Przykłady operacji atomowych:
 
 ### 3.4. Kontrola współbieżności
 
-Transfer zawodnika to **zasób limitowany**:
-do drużyny z jednym wolnym miejscem (limit składu = 10) dwóch użytkowników
-może próbować przenieść zawodnika jednocześnie. Dokładnie jeden może wygrać.
+Transfer zawodnika to operacja, o którą mogą się ścigać dwaj użytkownicy:
+próbują jednocześnie przenieść tego samego zawodnika. Dokładnie jeden może
+wygrać, a w historii transferów zostaje jeden wpis.
 
 Zastosowano dwie nakładające się techniki (`transfer.py`):
 
@@ -280,7 +278,7 @@ decyzja podejmowana jest na podstawie aktualnego stanu rekordu.
    database is locked` operacja jest ponawiana z rosnącym opóźnieniem
    (backoff), co pozwala obsłużyć przejściowe kolizje blokad WAL.
 
-Poprawność potwierdza test `test_two_users_compete_for_last_squad_slot`.
+Poprawność potwierdza test `test_two_users_transfer_same_player`.
 
 ### 3.5. Logika w bazie zamiast w aplikacji
 
@@ -291,7 +289,7 @@ implementować je w Pythonie:
   wykonuje sam `UPDATE player`, a wpis historii powstaje automatycznie. Dzięki
   temu **każda** zmiana drużyny zawodnika jest zarejestrowana, niezależnie od
   ścieżki kodu.
-- **Walidacje** (limit/minimum składu, okno transferowe, poprawność strzelca
+- **Walidacje** (okno transferowe, poprawność strzelca
   i wykonawcy karnego) są w triggerach — stanowią ostateczną linię obrony nawet
   gdyby walidacja aplikacyjna została pominięta. Warstwa serwisu sprawdza je też
   wcześniej, by zwrócić czytelny komunikat błędu.

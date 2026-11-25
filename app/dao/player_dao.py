@@ -2,8 +2,8 @@ from db.init import get_connection
 
 
 def add_player(team_id: int, name: str) -> int:
-    """Dodaje zawodnika do drużyny. Zwraca jego id.
-    Trigger trg_player_squad_limit pilnuje limitu 10 zawodników."""
+    """Dodaje zawodnika do drużyny (w dowolnej fazie turnieju, bez limitu składu).
+    Zwraca jego id."""
     with get_connection() as conn:
         cur = conn.execute(
             "INSERT INTO player (team_id, name) VALUES (?, ?)",

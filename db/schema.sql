@@ -110,15 +110,6 @@ CREATE INDEX idx_transfer_tournament_pl  ON transfer(tournament_id, player_id);
 
 -- TRIGGERY
 
--- 1. Limit składu drużyny: max 10 zawodników.
-CREATE TRIGGER trg_player_squad_limit
-BEFORE INSERT ON player
-FOR EACH ROW
-WHEN (SELECT COUNT(*) FROM player WHERE team_id = NEW.team_id) >= 10
-BEGIN
-    SELECT RAISE(ABORT, 'Drużyna ma już 10 zawodników (limit składu).');
-END;
-
 -- 2. Audyt transferu: po UPDATE team_id w player loguj do `transfer`.
 CREATE TRIGGER trg_transfer_audit
 AFTER UPDATE OF team_id ON player
@@ -144,16 +135,6 @@ WHEN OLD.team_id <> NEW.team_id
        WHERE tm.id = OLD.team_id) IN ('KO','FINISHED')
 BEGIN
     SELECT RAISE(ABORT, 'Transfery zablokowane po starcie fazy pucharowej.');
-END;
-
--- 4. Minimum składu: drużyna źródłowa nie może spaść poniżej 5 zawodników.
-CREATE TRIGGER trg_transfer_min_squad
-BEFORE UPDATE OF team_id ON player
-FOR EACH ROW
-WHEN OLD.team_id <> NEW.team_id
- AND (SELECT COUNT(*) FROM player WHERE team_id = OLD.team_id) <= 5
-BEGIN
-    SELECT RAISE(ABORT, 'Drużyna źródłowa musi mieć min. 5 zawodników.');
 END;
 
 -- 5. Walidacja bramki: strzelec musi grać w jednej z drużyn meczu.
