@@ -416,6 +416,10 @@ class TournamentPage(QWidget):
         btn_group_img.setToolTip("Eksport PNG: mecze jednej grupy w kolejce z wynikami i strzelcami.")
         btn_group_img.clicked.connect(self._export_group_round_graphic)
         top.addWidget(btn_group_img)
+        btn_stage_img = button("Grafika fazy grupowej")
+        btn_stage_img.setToolTip("Eksport PNG: wszystkie mecze fazy grupowej (kolejki obu grup) w jednej grafice.")
+        btn_stage_img.clicked.connect(self._export_group_stage_graphic)
+        top.addWidget(btn_stage_img)
         self.btn_confirm_groups = primary_button("Zatwierdź fazę grupową")
         self.btn_confirm_groups.setToolTip(
             "Tworzy drabinki KO. Po zatwierdzeniu wyniki grup są zablokowane.")
@@ -704,6 +708,10 @@ class TournamentPage(QWidget):
     def _export_knockout_graphic(self):
         self._save_graphic(lambda: graphics.render_knockout(self.tournament_id),
                            "faza pucharowa.png")
+
+    def _export_group_stage_graphic(self):
+        self._save_graphic(lambda: graphics.render_group_stage(self.tournament_id),
+                           "faza grupowa.png")
 
     def _export_scorers_graphic(self):
         self._save_graphic(lambda: graphics.render_scorers(self.tournament_id),

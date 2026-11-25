@@ -2,6 +2,7 @@
 
   - render_round(tid, n)   — kolejka fazy grupowej: mecze obu grup z godzinami
                              i wynikami oraz tabele grup po tej kolejce;
+  - render_group_stage(tid) — wszystkie mecze fazy grupowej (kolejki obu grup) w jednej grafice;
   - render_knockout(tid)   — faza pucharowa: trzy drabinki (miejsca 1-4, 5-8, 9-12);
   - render_scorers(tid)    — klasyfikacja strzelców (wszyscy z co najmniej jednym golem);
   - render_group_round(tid, n, g) — kolejka jednej grupy: mecze z wynikami i strzelcami.
@@ -200,6 +201,55 @@ def render_round(tournament_id: int, round_no: int) -> QImage:
         x = MARGIN + i * (col_w + GAP)
         body = _card(p, QRectF(x, y, col_w, table_h), f"GRUPA {g}")
         _standings(p, QRectF(x, body.y(), col_w, body.height()), tables[g])
+
+    p.end()
+    return img
+
+
+ROUND_LABEL_H = 30
+
+
+def render_group_stage(tournament_id: int) -> QImage:
+    """Wszystkie mecze fazy grupowej w jednej grafice: grupy obok siebie,
+    w każdej mecze podzielone na kolejki (z godzinami i wynikami, bez dat)."""
+    tournament = tournament_dao.get_tournament(tournament_id)["name"]
+    matches = [m for m in schedule.get_schedule(tournament_id) if m["stage"] == "GROUP"]
+    if not matches:
+        raise ValueError("Najpierw wygeneruj terminarz fazy grupowej.")
+    groups = sorted({m["group_name"] for m in matches})[:2]
+    rounds = sorted({m["round"] for m in matches})
+
+    def of(group: str, rnd: int) -> list[dict]:
+        return sorted((m for m in matches if m["group_name"] == group and m["round"] == rnd),
+                      key=lambda m: (m["scheduled_at"] or "9", m["match_id"]))
+
+    rows_per_round = max(len(of(g, r)) for g in groups for r in rounds)
+    block_h = ROUND_LABEL_H + rows_per_round * ROW_H
+    card_h = 46 + 10 + len(rounds) * block_h + 10
+    head_h = 160
+    height = head_h + 34 + card_h + 40
+
+    img, p = _new_image(height)
+    _header(p, tournament, "FAZA GRUPOWA", "")
+
+    col_w = (WIDTH - 2 * MARGIN - GAP) / 2
+    y = head_h + 34
+    for i, g in enumerate(groups):
+        x = MARGIN + i * (col_w + GAP)
+        body = _card(p, QRectF(x, y, col_w, card_h), f"GRUPA {g}")
+        ry = body.y() + 10
+        for k, rnd in enumerate(rounds):
+            fixtures = of(g, rnd)
+            if k:
+                p.setPen(QPen(QColor(C["border"]), 1))
+                p.drawLine(QPointF(x + 16, ry), QPointF(x + col_w - 16, ry))
+            _text(p, QRectF(x + 16, ry + 6, 300, ROUND_LABEL_H - 6), f"{rnd}. KOLEJKA", 14,
+                  weight=QFont.Bold, color="accent", spacing=1.5)
+            fy = ry + ROUND_LABEL_H
+            for m in fixtures:
+                _fixture_row(p, QRectF(x + 16, fy, col_w - 32, ROW_H), m, False)
+                fy += ROW_H
+            ry += block_h
 
     p.end()
     return img
