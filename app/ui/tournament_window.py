@@ -180,10 +180,12 @@ class TournamentPage(QWidget):
         self.tabs.addTab(page, "Drużyny i zawodnicy")
 
     def _selected_team_id(self):
-        row = self.teams_table.currentRow()
-        if row < 0:
+        # Z zaznaczenia, nie z currentRow(): przy przeciąganiu myszką Qt zmienia zaznaczenie
+        # PRZED bieżącym wierszem, więc sygnał zaznaczenia widziałby poprzednią drużynę.
+        rows = self.teams_table.selectionModel().selectedRows()
+        if not rows:
             return None
-        return self.teams_table.item(row, 0).data(UID)
+        return self.teams_table.item(rows[0].row(), 0).data(UID)
 
     def _refresh_teams(self):
         teams = team_dao.list_teams(self.tournament_id)
