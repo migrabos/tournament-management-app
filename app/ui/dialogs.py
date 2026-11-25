@@ -58,6 +58,11 @@ class ResultDialog(QDialog):
         cols.setSpacing(14)
         self.home_spins, self.home_own = self._team_card(cols, self.home, self.home_players)
         self.away_spins, self.away_own = self._team_card(cols, self.away, self.away_players)
+        # obie karty zawsze równej szerokości, niezależnie od składów i długości nazw
+        cards = [cols.itemAt(0).widget(), cols.itemAt(1).widget()]
+        width = max(c.sizeHint().width() for c in cards)
+        for c in cards:
+            c.setMinimumWidth(width)
         root.addLayout(cols)
 
         btns = QHBoxLayout()
@@ -101,7 +106,8 @@ class ResultDialog(QDialog):
             spins[p["id"]] = spin
             own_spins[p["id"]] = own
             lay.addLayout(row)
-        parent_layout.addWidget(frame)
+        lay.addStretch()        # zawartość od góry — nazwy drużyn w jednej linii także przy pustym składzie
+        parent_layout.addWidget(frame, 1)
         return spins, own_spins
 
     def _save(self):
